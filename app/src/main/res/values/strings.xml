@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Android MCP Agent</string>
+    <string name="accessibility_service_description">Allows AI agents to interact with your device through the MCP protocol. The service can read screen content, perform taps, scroll, and input text on your behalf. All actions are logged and require explicit permission.</string>
+
+    <!-- Pairing -->
+    <string name="pairing_title">Pair AI Client</string>
+    <string name="pairing_code_label">Pairing Code</string>
+    <string name="pairing_waiting">Waiting for connection…</string>
+    <string name="pairing_connected">Connected</string>
+    <string name="pairing_disconnected">Disconnected</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">MCP Agent</string>
+    <string name="server_status_running">Server Running</string>
+    <string name="server_status_stopped">Server Stopped</string>
+    <string name="start_server">Start Server</string>
+    <string name="stop_server">Stop Server</string>
+
+    <!-- Permissions -->
+    <string name="perm_allow_clicks">Allow UI Clicks</string>
+    <string name="perm_allow_text_input">Allow Text Input</string>
+    <string name="perm_allow_screenshots">Allow Screenshots</string>
+    <string name="perm_allow_read_screen">Allow Screen Reading</string>
+    <string name="perm_allow_app_launch">Allow App Launching</string>
+    <string name="perm_allow_device_info">Allow Device Info</string>
+
+    <!-- Logs -->
+    <string name="logs_title">Audit Log</string>
+    <string name="logs_empty">No actions recorded yet</string>
+    <string name="logs_clear">Clear Logs</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">MCP Agent Service</string>
+    <string name="notification_channel_description">Shows when the MCP agent server is running</string>
+    <string name="notification_title">MCP Agent Active</string>
+    <string name="notification_text">WebSocket server running on port %d</string>
+
+    <!-- Accessibility -->
+    <string name="accessibility_not_enabled">Accessibility service is not enabled. Please enable it in Settings.</string>
+    <string name="open_accessibility_settings">Open Settings</string>
+</resources>
