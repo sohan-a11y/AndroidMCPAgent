@@ -55,6 +55,8 @@ jobs:
       - name: Verify APK was produced
         run: |
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          MIN_APK_SIZE=1000000  # 1 MB minimum - typical Android APKs are much larger
+          
           if [ ! -f "$APK_PATH" ]; then
             echo "Error: APK file not found at $APK_PATH"
             exit 1
@@ -62,7 +64,7 @@ jobs:
           APK_SIZE=$(stat -c%s "$APK_PATH")
           echo "APK found at $APK_PATH"
           echo "APK size: $APK_SIZE bytes ($(($APK_SIZE / 1024 / 1024)) MB)"
-          if [ $APK_SIZE -lt 1000000 ]; then
+          if [ $APK_SIZE -lt $MIN_APK_SIZE ]; then
             echo "Warning: APK size is suspiciously small (< 1 MB)"
             exit 1
           fi
