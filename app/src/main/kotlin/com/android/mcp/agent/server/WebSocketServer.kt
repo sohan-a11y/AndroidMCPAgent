@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 /**
  * Ktor-based WebSocket server for MCP protocol communication.
@@ -49,7 +50,7 @@ class WebSocketServer(
         prettyPrint = false
     }
 
-    private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    private var server: ApplicationEngine? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _isRunning = MutableStateFlow(false)
@@ -102,7 +103,7 @@ class WebSocketServer(
     fun stop() {
         scope.launch {
             try {
-                server?.stop(1000, 2000)
+                server?.stop(1000, 2000, TimeUnit.MILLISECONDS)
                 server = null
                 _isRunning.value = false
                 sessionManager.disconnectAll()
