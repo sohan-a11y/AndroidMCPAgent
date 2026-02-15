@@ -11,6 +11,8 @@ import io.ktor.server.engine.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import io.ktor.server.plugins.origin
+import io.ktor.server.response.respondText
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -76,9 +78,8 @@ class WebSocketServer(
                 }
 
                 // Health check endpoint (non-WS)
-                webSocket("/health") {
-                    send(Frame.Text("""{"status":"ok","version":"0.1.0"}"""))
-                    close(CloseReason(CloseReason.Codes.NORMAL, "Health check complete"))
+                get("/health") {
+                    call.respondText("""{"status":"ok","version":"0.1.0"}""")
                 }
             }
         }

@@ -93,7 +93,7 @@ class CommandRouter(
             val response = when (result) {
                 is CommandResult.Success -> MCPResponse.success(
                     command.id,
-                    JsonObject(result.data)
+                    JsonObject(result.data) as kotlinx.serialization.json.JsonElement
                 )
                 is CommandResult.Error -> MCPResponse.error(
                     command.id,
