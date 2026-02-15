@@ -18,6 +18,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Use default debug signing (auto-generated debug.keystore)
+            // This is usually automatic, but being explicit helps CI
+            isDebuggable = true
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
