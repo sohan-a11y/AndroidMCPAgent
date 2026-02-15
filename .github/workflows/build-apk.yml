@@ -29,11 +29,19 @@ jobs:
 
       - name: Set up Android SDK
         run: |
+          # Ensure ANDROID_HOME is set and available to all steps
+          # setup-java action should have set this, but we make it explicit
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "Android SDK location: $ANDROID_HOME"
 
       - name: Accept Android SDK Licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        run: |
+          if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || echo "Warning: License acceptance failed, but continuing..."
+          else
+            echo "Warning: sdkmanager not found at expected location, skipping license acceptance"
+          fi
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version=8.5
