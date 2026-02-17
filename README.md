@@ -21,16 +21,15 @@ This project is configured with GitHub Actions to automatically build the APK on
 Prerequisites:
 - JDK 17
 - Android SDK
-- Gradle 8.5 (or higher)
+- Gradle 8.11.1 (or use the included wrapper)
 
 ```bash
-# Verify Gradle version
-gradle -v
+# Using Gradle Wrapper (recommended)
+./gradlew assembleDebug
 
-# Build Debug APK
+# Or with your local Gradle installation
 gradle assembleDebug
 ```
-Note: The `gradle-wrapper.jar` is purposefully excluded to keep the repo clean. Use your local Gradle installation or let Android Studio (Koala Feature Drop or newer) manage it.
 
 ## Usage
 1. **Install & Open**: Install the APK and open the app.
