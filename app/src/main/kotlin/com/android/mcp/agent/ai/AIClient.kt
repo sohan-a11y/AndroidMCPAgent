@@ -7,9 +7,9 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 /**
  * Unified AI client for making requests to various AI providers.
@@ -122,11 +122,9 @@ private data class ChatCompletionRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val temperature: Double = 0.7,
+    @SerialName("max_tokens")
     val maxTokens: Int = 1024
-) {
-    // Kotlinx serialization uses camelCase by default, but API expects snake_case
-    val max_tokens: Int = maxTokens
-}
+)
 
 /**
  * Response from chat completion API.
@@ -143,20 +141,16 @@ data class ChatCompletionResponse(
 data class Choice(
     val index: Int,
     val message: ChatMessage,
+    @SerialName("finish_reason")
     val finishReason: String? = null
-) {
-    // Handle snake_case from API
-    val finish_reason: String? = finishReason
-}
+)
 
 @Serializable
 data class Usage(
+    @SerialName("prompt_tokens")
     val promptTokens: Int,
+    @SerialName("completion_tokens")
     val completionTokens: Int,
+    @SerialName("total_tokens")
     val totalTokens: Int
-) {
-    // Handle snake_case from API
-    val prompt_tokens: Int = promptTokens
-    val completion_tokens: Int = completionTokens
-    val total_tokens: Int = totalTokens
-}
+)
