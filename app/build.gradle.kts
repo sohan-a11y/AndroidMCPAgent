@@ -54,6 +54,11 @@ dependencies {
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.serialization.json)
 
+    // Ktor Client
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.content.negotiation)
+
     // Kotlin
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
