@@ -38,12 +38,14 @@ class AIClient(
     private val apiKey: String,
     private val model: String? = null
 ) {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        prettyPrint = true
+    }
+    
     private val httpClient = HttpClient(CIO) {
         install(ContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-                prettyPrint = true
-            })
+            json(this@AIClient.json)
         }
     }
 
@@ -81,13 +83,13 @@ class AIClient(
             setBody(requestBody)
         }
 
-        val responseText = response.bodyAsText()
-        
         if (!response.status.isSuccess()) {
-            throw Exception("AI request failed: ${response.status} - $responseText")
+            val errorBody = response.bodyAsText()
+            throw Exception("AI request failed: ${response.status} - $errorBody")
         }
 
-        return Json.decodeFromString(responseText)
+        val responseText = response.bodyAsText()
+        return json.decodeFromString(responseText)
     }
 
     /**
@@ -118,7 +120,7 @@ data class ChatMessage(
  * Request body for chat completion API (OpenAI-compatible format).
  */
 @Serializable
-private data class ChatCompletionRequest(
+internal data class ChatCompletionRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val temperature: Double = 0.7,
