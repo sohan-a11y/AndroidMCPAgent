@@ -13,12 +13,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
@@ -104,36 +108,41 @@ private fun AndroidAiMcpApp(
         bottomBar = {
             if (currentRoute in Routes.BottomTabs) {
                 NavigationBar {
-                    BottomTabItem(
-                        route = Routes.Setup,
-                        label = "Setup",
-                        currentRoute = currentRoute,
-                        navController = navController
-                    )
-                    BottomTabItem(
-                        route = Routes.Command,
-                        label = "Command",
-                        currentRoute = currentRoute,
-                        navController = navController
-                    )
-                    BottomTabItem(
-                        route = Routes.Templates,
-                        label = "Templates",
-                        currentRoute = currentRoute,
-                        navController = navController
-                    )
-                    BottomTabItem(
-                        route = Routes.Vault,
-                        label = "Vault",
-                        currentRoute = currentRoute,
-                        navController = navController
-                    )
-                    BottomTabItem(
-                        route = Routes.Logs,
-                        label = "Logs",
-                        currentRoute = currentRoute,
-                        navController = navController
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        BottomTabItem(
+                            route = Routes.Setup,
+                            label = "Setup",
+                            currentRoute = currentRoute,
+                            navController = navController
+                        )
+                        BottomTabItem(
+                            route = Routes.Command,
+                            label = "Command",
+                            currentRoute = currentRoute,
+                            navController = navController
+                        )
+                        BottomTabItem(
+                            route = Routes.Templates,
+                            label = "Templates",
+                            currentRoute = currentRoute,
+                            navController = navController
+                        )
+                        BottomTabItem(
+                            route = Routes.Vault,
+                            label = "Vault",
+                            currentRoute = currentRoute,
+                            navController = navController
+                        )
+                        BottomTabItem(
+                            route = Routes.Logs,
+                            label = "Logs",
+                            currentRoute = currentRoute,
+                            navController = navController
+                        )
+                    }
                 }
             }
         }
@@ -244,18 +253,25 @@ private fun BottomTabItem(
     currentRoute: String,
     navController: androidx.navigation.NavHostController
 ) {
-    androidx.compose.material3.NavigationBarItem(
-        selected = currentRoute == route,
+    val selected = currentRoute == route
+    TextButton(
         onClick = {
             navController.navigate(route) {
                 launchSingleTop = true
                 restoreState = true
                 popUpTo(Routes.Setup) { saveState = true }
             }
-        },
-        label = { Text(label) },
-        icon = { Text(label.first().toString()) }
-    )
+        }
+    ) {
+        Text(
+            text = label,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+    }
 }
 
 private fun showBiometricPrompt(
