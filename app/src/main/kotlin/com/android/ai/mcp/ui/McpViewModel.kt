@@ -1,14 +1,26 @@
 package com.android.ai.mcp.ui
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.ai.mcp.AndroidAiMcpApplication
 import com.android.ai.mcp.domain.AiProvider
+import com.android.ai.mcp.domain.CommandSource
 import com.android.ai.mcp.domain.ExecutionState
+import com.android.ai.mcp.domain.WakeScope
 import com.android.ai.mcp.execution.ActionExecutor
+import com.android.ai.mcp.execution.ActionValidator
+import com.android.ai.mcp.storage.automation.TaskTemplateEntity
 import com.android.ai.mcp.system.ExecutionForegroundService
 import com.android.ai.mcp.system.MCPAccessibilityService
+import com.android.ai.mcp.system.PlanReadyNotifier
+import com.android.ai.mcp.system.VoiceCommandService
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +30,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class McpViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -30,15 +44,45 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
     val events = _events.asSharedFlow()
 
     private var executionJob: Job? = null
+    private var credentialPromptContinuation: CancellableContinuation<Boolean>? = null
 
     @Volatile
     private var stopRequested = false
 
+    private val voiceReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != VoiceCommandService.ACTION_VOICE_COMMAND) return
+            val command = intent.getStringExtra(VoiceCommandService.EXTRA_COMMAND_TEXT)?.trim().orEmpty()
+            if (command.isNotEmpty()) {
+                onCommandTextChanged(command)
+                generatePlanFromCommand(
+                    command = command,
+                    commandSource = CommandSource.VOICE,
+                    templateId = null
+                )
+            }
+        }
+    }
+
     init {
+        registerVoiceReceiver()
         observeSettings()
         observeLogs()
+        observeTemplates()
+        observeCredentials()
         refreshApiKeyState()
         refreshAccessibilityStatus()
+        refreshOpenRouterFreeModels()
+        syncVaultState()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            getApplication<Application>().unregisterReceiver(voiceReceiver)
+        } catch (_: Exception) {
+            // Ignore if already unregistered.
+        }
     }
 
     fun refreshAccessibilityStatus() {
@@ -78,6 +122,78 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refreshApiKeyState()
+        refreshOpenRouterFreeModels()
+    }
+
+    fun onOpenRouterModelInputChanged(value: String) {
+        viewModelScope.launch {
+            app.settingsRepository.setOpenRouterModelId(value)
+        }
+    }
+
+    fun onNvidiaModelInputChanged(value: String) {
+        viewModelScope.launch {
+            app.settingsRepository.setNvidiaModelId(value)
+        }
+    }
+
+    fun onWakeWordChanged(value: String) {
+        viewModelScope.launch {
+            app.settingsRepository.setWakeWord(value)
+        }
+    }
+
+    fun onWakeEnabledChanged(enabled: Boolean) {
+        viewModelScope.launch {
+            app.settingsRepository.setWakeEnabled(enabled)
+        }
+    }
+
+    fun onWakeScopeChanged(scope: WakeScope) {
+        viewModelScope.launch {
+            app.settingsRepository.setWakeScope(scope)
+        }
+    }
+
+    fun startVoiceListeningNow() {
+        val settings = _uiState.value.settings
+        VoiceCommandService.start(getApplication(), settings.wakeWord)
+    }
+
+    fun stopVoiceListeningNow() {
+        VoiceCommandService.stop(getApplication())
+    }
+
+    fun onVaultSessionTimeoutChanged(value: String) {
+        val parsed = value.toIntOrNull() ?: return
+        viewModelScope.launch {
+            app.settingsRepository.setVaultSessionTimeoutMinutes(parsed)
+        }
+    }
+
+    fun refreshOpenRouterFreeModels() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshingOpenRouterModels = true, modelValidationMessage = null) }
+            try {
+                val apiKey = app.secureStore.getApiKey(AiProvider.OPENROUTER)
+                val models = app.modelCatalogRepository.refreshOpenRouterFreeModels(apiKey)
+                _uiState.update {
+                    it.copy(
+                        openRouterFreeModels = models,
+                        isRefreshingOpenRouterModels = false
+                    )
+                }
+            } catch (e: Exception) {
+                val cached = app.modelCatalogRepository.getCachedOpenRouterFreeModels()
+                _uiState.update {
+                    it.copy(
+                        openRouterFreeModels = cached,
+                        isRefreshingOpenRouterModels = false,
+                        modelValidationMessage = "Model refresh failed: ${e.message ?: "unknown error"}"
+                    )
+                }
+            }
+        }
     }
 
     fun onCommandTextChanged(value: String) {
@@ -109,15 +225,23 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(errorMessage = null) }
     }
 
+    fun showError(message: String) {
+        _uiState.update { it.copy(errorMessage = message) }
+    }
+
     fun cancelPreview() {
         _uiState.update {
             it.copy(
                 pendingPlan = null,
                 pendingPlanJson = "",
                 pendingRunId = null,
+                pendingTemplateId = null,
+                pendingMaxPlanSteps = null,
+                pendingResumeStepIndex = null,
                 validationErrors = emptyList(),
                 executionState = ExecutionState.IDLE,
-                executionMessage = ""
+                executionMessage = "",
+                pendingCredentialFillPrompt = null
             )
         }
     }
@@ -136,116 +260,178 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun generatePlan() {
+        val command = _uiState.value.commandText.trim()
+        generatePlanFromCommand(
+            command = command,
+            commandSource = CommandSource.MANUAL,
+            templateId = null
+        )
+    }
+
+    fun onTemplateNameChanged(value: String) {
+        _uiState.update { it.copy(newTemplateName = value) }
+    }
+
+    fun saveCurrentCommandAsTemplate() {
         val state = _uiState.value
         val command = state.commandText.trim()
-        if (command.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Enter a command first") }
-            return
-        }
-
-        val provider = state.settings.selectedProvider
-        val apiKey = app.secureStore.getApiKey(provider)
-        if (apiKey.isNullOrBlank()) {
-            _uiState.update {
-                it.copy(errorMessage = "Missing API key for ${provider.value}. Add it in Setup.")
-            }
+        val name = state.newTemplateName.trim()
+        if (command.isEmpty() || name.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Template name and command are required") }
             return
         }
 
         viewModelScope.launch {
+            val provider = state.settings.selectedProvider
+            val modelId = selectedModelId(provider, state)
+            app.taskTemplateRepository.saveTemplate(
+                name = name,
+                commandText = command,
+                provider = provider,
+                modelId = modelId,
+                maxPlanSteps = state.settings.maxPlanSteps,
+                stepDelayMs = state.settings.stepDelayMs,
+                appPackageHint = null
+            )
             _uiState.update {
                 it.copy(
-                    isPlanning = true,
-                    errorMessage = null,
-                    validationErrors = emptyList(),
-                    executionState = ExecutionState.PLANNING,
-                    executionMessage = "Generating action plan..."
+                    newTemplateName = "",
+                    executionMessage = "Template saved"
                 )
-            }
-
-            try {
-                val settings = _uiState.value.settings
-                val screenContext = app.screenContextReader.buildContextForPlanner()
-                val planningResult = app.aiPlanner.generatePlan(
-                    provider = provider,
-                    apiKey = apiKey,
-                    command = command,
-                    screenContext = screenContext,
-                    maxSteps = settings.maxPlanSteps
-                )
-
-                val validation = app.actionValidator.validate(
-                    plan = planningResult.actionPlan,
-                    maxSteps = settings.maxPlanSteps
-                )
-
-                if (!validation.isValid) {
-                    app.logsRepository.createRun(
-                        commandText = command,
-                        provider = provider,
-                        rawPlanJson = planningResult.extractedPlanJson,
-                        validatedPlan = planningResult.actionPlan,
-                        maxPlanSteps = settings.maxPlanSteps,
-                        status = ActionExecutor.STATUS_VALIDATION_FAILED,
-                        errorMessage = validation.errors.joinToString("; ")
-                    )
-
-                    _uiState.update {
-                        it.copy(
-                            isPlanning = false,
-                            screenContextPreview = screenContext,
-                            validationErrors = validation.errors,
-                            executionState = ExecutionState.IDLE,
-                            executionMessage = "Plan rejected by validator"
-                        )
-                    }
-                    return@launch
-                }
-
-                val runId = app.logsRepository.createRun(
-                    commandText = command,
-                    provider = provider,
-                    rawPlanJson = planningResult.extractedPlanJson,
-                    validatedPlan = planningResult.actionPlan,
-                    maxPlanSteps = settings.maxPlanSteps,
-                    status = ActionExecutor.STATUS_PREVIEW_READY
-                )
-
-                _uiState.update {
-                    it.copy(
-                        isPlanning = false,
-                        screenContextPreview = screenContext,
-                        pendingPlan = planningResult.actionPlan,
-                        pendingPlanJson = planningResult.normalizedPlanJson,
-                        pendingRunId = runId,
-                        validationErrors = emptyList(),
-                        executionState = ExecutionState.READY_FOR_CONFIRMATION,
-                        executionMessage = "Preview ready"
-                    )
-                }
-
-                _events.emit(UiEvent.NavigateToPreview)
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isPlanning = false,
-                        executionState = ExecutionState.IDLE,
-                        executionMessage = "",
-                        errorMessage = e.message ?: "Failed to generate plan"
-                    )
-                }
             }
         }
+    }
+
+    fun runTemplate(template: TaskTemplateEntity) {
+        viewModelScope.launch {
+            val provider = AiProvider.fromValue(template.provider)
+            app.settingsRepository.setSelectedProvider(provider)
+            when (provider) {
+                AiProvider.OPENROUTER -> app.settingsRepository.setOpenRouterModelId(template.modelId)
+                AiProvider.NVIDIA -> app.settingsRepository.setNvidiaModelId(template.modelId)
+            }
+            app.settingsRepository.setMaxPlanSteps(template.maxPlanSteps)
+            app.settingsRepository.setStepDelayMs(template.stepDelayMs)
+
+            onCommandTextChanged(template.commandText)
+            app.taskTemplateRepository.markTemplateUsed(template.id)
+
+            generatePlanFromCommand(
+                command = template.commandText,
+                commandSource = CommandSource.TEMPLATE,
+                templateId = template.id,
+                providerOverride = provider,
+                modelIdOverride = template.modelId,
+                maxStepsOverride = template.maxPlanSteps
+            )
+        }
+    }
+
+    fun deleteTemplate(templateId: Long) {
+        viewModelScope.launch {
+            app.taskTemplateRepository.deleteTemplate(templateId)
+        }
+    }
+
+    fun onCredentialAppPackageChanged(value: String) {
+        _uiState.update { it.copy(credentialAppPackageInput = value) }
+    }
+
+    fun onCredentialFieldHintChanged(value: String) {
+        _uiState.update { it.copy(credentialFieldHintInput = value) }
+    }
+
+    fun onCredentialAccountLabelChanged(value: String) {
+        _uiState.update { it.copy(credentialAccountLabelInput = value) }
+    }
+
+    fun onCredentialUsernameChanged(value: String) {
+        _uiState.update { it.copy(credentialUsernameInput = value) }
+    }
+
+    fun onCredentialPasswordChanged(value: String) {
+        _uiState.update { it.copy(credentialPasswordInput = value) }
+    }
+
+    fun saveCredential() {
+        val state = _uiState.value
+        val appPackage = state.credentialAppPackageInput.trim()
+        val accountLabel = state.credentialAccountLabelInput.trim()
+        val password = state.credentialPasswordInput
+        if (appPackage.isEmpty() || accountLabel.isEmpty() || password.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Credential requires app package, account label, and password") }
+            return
+        }
+
+        viewModelScope.launch {
+            app.credentialVaultRepository.upsertCredential(
+                id = null,
+                appPackage = appPackage,
+                fieldHint = state.credentialFieldHintInput,
+                accountLabel = accountLabel,
+                username = state.credentialUsernameInput,
+                passwordPlaintext = password
+            )
+            _uiState.update {
+                it.copy(
+                    credentialAppPackageInput = "",
+                    credentialFieldHintInput = "",
+                    credentialAccountLabelInput = "",
+                    credentialUsernameInput = "",
+                    credentialPasswordInput = "",
+                    executionMessage = "Credential saved"
+                )
+            }
+        }
+    }
+
+    fun deleteCredential(id: Long) {
+        viewModelScope.launch {
+            app.credentialVaultRepository.deleteCredential(id)
+        }
+    }
+
+    fun requestVaultUnlock() {
+        viewModelScope.launch {
+            _events.emit(UiEvent.RequestBiometricUnlock)
+        }
+    }
+
+    fun onVaultUnlockAuthenticated() {
+        val timeout = _uiState.value.settings.vaultSessionTimeoutMinutes
+        app.credentialVaultRepository.unlockSession(timeout)
+        syncVaultState()
+    }
+
+    fun lockVault() {
+        app.credentialVaultRepository.lockSession()
+        syncVaultState()
+    }
+
+    fun approveCredentialFill() {
+        val continuation = credentialPromptContinuation
+        credentialPromptContinuation = null
+        continuation?.resume(true)
+        _uiState.update { it.copy(pendingCredentialFillPrompt = null) }
+    }
+
+    fun rejectCredentialFill() {
+        val continuation = credentialPromptContinuation
+        credentialPromptContinuation = null
+        continuation?.resume(false)
+        _uiState.update { it.copy(pendingCredentialFillPrompt = null) }
     }
 
     fun confirmAndExecutePlan() {
         val state = _uiState.value
         val plan = state.pendingPlan ?: return
         val runId = state.pendingRunId ?: return
+        val startStepIndex = state.pendingResumeStepIndex ?: 0
+        val allowManualHandoff = startStepIndex == 0
 
         val validation = app.actionValidator.validate(
             plan = plan,
-            maxSteps = state.settings.maxPlanSteps
+            maxSteps = state.pendingMaxPlanSteps ?: state.settings.maxPlanSteps
         )
         if (!validation.isValid) {
             viewModelScope.launch {
@@ -271,9 +457,9 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 executionState = ExecutionState.RUNNING,
-                executionCurrentStep = 0,
+                executionCurrentStep = startStepIndex,
                 executionTotalSteps = plan.steps.size,
-                executionMessage = "Execution started"
+                executionMessage = if (startStepIndex > 0) "Resuming execution..." else "Execution started"
             )
         }
 
@@ -285,6 +471,8 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
                     runId = runId,
                     actionPlan = plan,
                     stepDelayMs = state.settings.stepDelayMs,
+                    startStepIndex = startStepIndex,
+                    allowManualHandoff = allowManualHandoff,
                     shouldStop = { stopRequested },
                     onStepStarted = { currentStep, totalSteps, action ->
                         _uiState.update {
@@ -294,22 +482,47 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
                                 executionMessage = "Executing $action ($currentStep/$totalSteps)"
                             )
                         }
+                    },
+                    onCredentialFillRequested = { step, currentStep, totalSteps ->
+                        requestCredentialFillApproval(step, currentStep, totalSteps)
                     }
                 )
 
-                _uiState.update {
-                    it.copy(
-                        pendingPlan = null,
-                        pendingPlanJson = "",
-                        pendingRunId = null,
-                        executionState = summary.state,
-                        executionMessage = when (summary.state) {
-                            ExecutionState.COMPLETED -> "Execution completed"
-                            ExecutionState.STOPPED -> "Execution stopped"
-                            ExecutionState.FAILED -> summary.errorMessage ?: "Execution failed"
-                            else -> "Execution finished"
+                when (summary.state) {
+                    ExecutionState.AWAITING_USER -> {
+                        _uiState.update {
+                            it.copy(
+                                executionState = ExecutionState.AWAITING_USER,
+                                executionMessage = "Manual unlock required. Unlock target app, then tap Resume.",
+                                pendingResumeStepIndex = summary.failedStepIndex
+                            )
                         }
-                    )
+                    }
+
+                    ExecutionState.COMPLETED,
+                    ExecutionState.STOPPED,
+                    ExecutionState.FAILED -> {
+                        _uiState.update {
+                            it.copy(
+                                pendingPlan = null,
+                                pendingPlanJson = "",
+                                pendingRunId = null,
+                                pendingTemplateId = null,
+                                pendingMaxPlanSteps = null,
+                                pendingResumeStepIndex = null,
+                                pendingCredentialFillPrompt = null,
+                                executionState = summary.state,
+                                executionMessage = when (summary.state) {
+                                    ExecutionState.COMPLETED -> "Execution completed"
+                                    ExecutionState.STOPPED -> "Execution stopped"
+                                    ExecutionState.FAILED -> summary.errorMessage ?: "Execution failed"
+                                    else -> "Execution finished"
+                                }
+                            )
+                        }
+                    }
+
+                    else -> Unit
                 }
             } catch (e: Exception) {
                 app.logsRepository.updateRunStatus(
@@ -322,6 +535,10 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
                         pendingPlan = null,
                         pendingPlanJson = "",
                         pendingRunId = null,
+                        pendingTemplateId = null,
+                        pendingMaxPlanSteps = null,
+                        pendingResumeStepIndex = null,
+                        pendingCredentialFillPrompt = null,
                         executionState = ExecutionState.FAILED,
                         executionMessage = "",
                         errorMessage = e.message ?: "Execution error"
@@ -333,12 +550,53 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun requestCredentialFillApproval(
+        step: com.android.ai.mcp.domain.PlanStep,
+        currentStep: Int,
+        totalSteps: Int
+    ): Boolean {
+        if (!app.credentialVaultRepository.isSessionUnlocked()) {
+            _uiState.update {
+                it.copy(errorMessage = "Vault is locked. Unlock vault before approving credential fill.")
+            }
+            return false
+        }
+
+        val appPackage = app.screenContextReader.currentPackageName() ?: "unknown"
+        val fieldHint = step.params["field_hint"]?.toString()?.trim('"')
+        val accountHint = step.params["account_hint"]?.toString()?.trim('"')
+
+        return suspendCancellableCoroutine { continuation ->
+            credentialPromptContinuation?.cancel()
+            credentialPromptContinuation = continuation
+            _uiState.update {
+                it.copy(
+                    pendingCredentialFillPrompt = CredentialFillPrompt(
+                        appPackage = appPackage,
+                        fieldHint = fieldHint,
+                        accountHint = accountHint,
+                        stepNumber = currentStep,
+                        totalSteps = totalSteps
+                    )
+                )
+            }
+            continuation.invokeOnCancellation {
+                if (credentialPromptContinuation === continuation) {
+                    credentialPromptContinuation = null
+                    _uiState.update { state -> state.copy(pendingCredentialFillPrompt = null) }
+                }
+            }
+        }
+    }
+
     private fun observeSettings() {
         viewModelScope.launch {
             app.settingsRepository.getSettings().collectLatest { settings ->
                 _uiState.update { state ->
                     state.copy(settings = settings)
                 }
+                syncVaultState()
+                syncVoiceService(settings)
             }
         }
     }
@@ -351,12 +609,201 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun observeTemplates() {
+        viewModelScope.launch {
+            app.taskTemplateRepository.observeTemplates().collectLatest { templates ->
+                _uiState.update { it.copy(templates = templates) }
+            }
+        }
+    }
+
+    private fun observeCredentials() {
+        viewModelScope.launch {
+            app.credentialVaultRepository.observeCredentials().collectLatest { credentials ->
+                _uiState.update { it.copy(credentials = credentials) }
+            }
+        }
+    }
+
     private fun refreshApiKeyState() {
         _uiState.update {
             it.copy(
                 hasOpenRouterKey = app.secureStore.hasApiKey(AiProvider.OPENROUTER),
                 hasNvidiaKey = app.secureStore.hasApiKey(AiProvider.NVIDIA)
             )
+        }
+    }
+
+    private fun syncVoiceService(settings: com.android.ai.mcp.domain.AppSettings) {
+        val context = getApplication<Application>()
+        when {
+            !settings.wakeEnabled -> VoiceCommandService.stop(context)
+            settings.wakeScope == WakeScope.MANUAL_START -> VoiceCommandService.stop(context)
+            else -> VoiceCommandService.start(context, settings.wakeWord)
+        }
+    }
+
+    private fun syncVaultState() {
+        _uiState.update {
+            it.copy(isVaultUnlocked = app.credentialVaultRepository.isSessionUnlocked())
+        }
+    }
+
+    private fun registerVoiceReceiver() {
+        val context = getApplication<Application>()
+        val filter = IntentFilter(VoiceCommandService.ACTION_VOICE_COMMAND)
+        ContextCompat.registerReceiver(
+            context,
+            voiceReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    private fun selectedModelId(provider: AiProvider, state: McpUiState): String {
+        return when (provider) {
+            AiProvider.OPENROUTER -> state.settings.openRouterModelId
+            AiProvider.NVIDIA -> state.settings.nvidiaModelId
+        }
+    }
+
+    private fun generatePlanFromCommand(
+        command: String,
+        commandSource: CommandSource,
+        templateId: Long?,
+        providerOverride: AiProvider? = null,
+        modelIdOverride: String? = null,
+        maxStepsOverride: Int? = null
+    ) {
+        val trimmedCommand = command.trim()
+        if (trimmedCommand.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Enter a command first") }
+            return
+        }
+
+        val state = _uiState.value
+        val provider = providerOverride ?: state.settings.selectedProvider
+        val modelId = modelIdOverride ?: selectedModelId(provider, state)
+        val maxSteps = maxStepsOverride ?: state.settings.maxPlanSteps
+        val apiKey = app.secureStore.getApiKey(provider)
+        if (apiKey.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(errorMessage = "Missing API key for ${provider.value}. Add it in Setup.")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            if (provider == AiProvider.OPENROUTER) {
+                val validation = app.modelCatalogRepository.validateOpenRouterModel(modelId, apiKey)
+                if (!validation.allowed) {
+                    _uiState.update {
+                        it.copy(errorMessage = validation.message ?: "Selected OpenRouter model is not allowed")
+                    }
+                    return@launch
+                }
+                _uiState.update { it.copy(modelValidationMessage = validation.message) }
+            }
+
+            _uiState.update {
+                it.copy(
+                    isPlanning = true,
+                    errorMessage = null,
+                    validationErrors = emptyList(),
+                    executionState = ExecutionState.PLANNING,
+                    executionMessage = "Generating action plan..."
+                )
+            }
+
+            try {
+                val screenContext = app.screenContextReader.buildContextForPlanner()
+                val planningResult = app.aiPlanner.generatePlan(
+                    provider = provider,
+                    modelId = modelId,
+                    apiKey = apiKey,
+                    command = trimmedCommand,
+                    screenContext = screenContext,
+                    maxSteps = maxSteps
+                )
+
+                val validation = app.actionValidator.validate(
+                    plan = planningResult.actionPlan,
+                    maxSteps = maxSteps
+                )
+
+                if (!validation.isValid) {
+                    app.logsRepository.createRun(
+                        commandText = trimmedCommand,
+                        provider = provider,
+                        modelId = modelId,
+                        commandSource = commandSource,
+                        templateId = templateId,
+                        rawPlanJson = planningResult.extractedPlanJson,
+                        validatedPlan = planningResult.actionPlan,
+                        maxPlanSteps = maxSteps,
+                        status = ActionExecutor.STATUS_VALIDATION_FAILED,
+                        errorMessage = validation.errors.joinToString("; ")
+                    )
+
+                    _uiState.update {
+                        it.copy(
+                            isPlanning = false,
+                            screenContextPreview = screenContext,
+                            validationErrors = validation.errors,
+                            executionState = ExecutionState.IDLE,
+                            executionMessage = "Plan rejected by validator"
+                        )
+                    }
+                    return@launch
+                }
+
+                val runId = app.logsRepository.createRun(
+                    commandText = trimmedCommand,
+                    provider = provider,
+                    modelId = planningResult.modelId,
+                    commandSource = commandSource,
+                    templateId = templateId,
+                    rawPlanJson = planningResult.extractedPlanJson,
+                    validatedPlan = planningResult.actionPlan,
+                    maxPlanSteps = maxSteps,
+                    status = ActionExecutor.STATUS_PREVIEW_READY
+                )
+
+                _uiState.update {
+                    it.copy(
+                        isPlanning = false,
+                        screenContextPreview = screenContext,
+                        pendingPlan = planningResult.actionPlan,
+                        pendingPlanJson = planningResult.normalizedPlanJson,
+                        pendingRunId = runId,
+                        pendingCommandSource = commandSource,
+                        pendingTemplateId = templateId,
+                        pendingMaxPlanSteps = maxSteps,
+                        pendingResumeStepIndex = null,
+                        validationErrors = emptyList(),
+                        executionState = ExecutionState.READY_FOR_CONFIRMATION,
+                        executionMessage = "Preview ready"
+                    )
+                }
+
+                if (commandSource == CommandSource.VOICE) {
+                    PlanReadyNotifier.show(
+                        context = getApplication(),
+                        commandText = trimmedCommand
+                    )
+                }
+
+                _events.emit(UiEvent.NavigateToPreview)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isPlanning = false,
+                        executionState = ExecutionState.IDLE,
+                        executionMessage = "",
+                        errorMessage = e.message ?: "Failed to generate plan"
+                    )
+                }
+            }
         }
     }
 }

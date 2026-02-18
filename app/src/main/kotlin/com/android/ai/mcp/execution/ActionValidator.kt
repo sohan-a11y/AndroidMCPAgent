@@ -17,6 +17,7 @@ class ActionValidator {
         const val ACTION_BACK = "back"
         const val ACTION_HOME = "home"
         const val ACTION_GET_SCREEN_TEXT = "get_screen_text"
+        const val ACTION_FILL_SAVED_PASSWORD = "fill_saved_password"
 
         val ALLOWED_ACTIONS = setOf(
             ACTION_OPEN_APP,
@@ -25,7 +26,8 @@ class ActionValidator {
             ACTION_SCROLL,
             ACTION_BACK,
             ACTION_HOME,
-            ACTION_GET_SCREEN_TEXT
+            ACTION_GET_SCREEN_TEXT,
+            ACTION_FILL_SAVED_PASSWORD
         )
 
         private val ALLOWED_SCROLL_DIRECTIONS = setOf("up", "down", "left", "right")
@@ -51,8 +53,10 @@ class ActionValidator {
 
             when (step.action) {
                 ACTION_OPEN_APP -> {
-                    if (step.params.requireString("package_name") == null) {
-                        errors.add("Step ${index + 1}: open_app requires package_name")
+                    val packageName = step.params.requireString("package_name")
+                    val appName = step.params.requireString("app_name")
+                    if (packageName == null && appName == null) {
+                        errors.add("Step ${index + 1}: open_app requires package_name or app_name")
                     }
                 }
 
@@ -81,6 +85,17 @@ class ActionValidator {
                 ACTION_HOME,
                 ACTION_GET_SCREEN_TEXT -> {
                     // No required params.
+                }
+
+                ACTION_FILL_SAVED_PASSWORD -> {
+                    val fieldHint = step.params.optionalString("field_hint")
+                    val accountHint = step.params.optionalString("account_hint")
+                    if (fieldHint != null && fieldHint.length > 120) {
+                        errors.add("Step ${index + 1}: field_hint is too long")
+                    }
+                    if (accountHint != null && accountHint.length > 120) {
+                        errors.add("Step ${index + 1}: account_hint is too long")
+                    }
                 }
             }
         }

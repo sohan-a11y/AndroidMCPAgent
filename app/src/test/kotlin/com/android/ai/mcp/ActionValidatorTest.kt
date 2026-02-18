@@ -52,4 +52,34 @@ class ActionValidatorTest {
         val result = validator.validate(plan, maxSteps = 20)
         assertFalse(result.isValid)
     }
+
+    @Test
+    fun openAppAcceptsAppNameWithoutPackageName() {
+        val plan = ActionPlan(
+            steps = listOf(
+                PlanStep(
+                    action = ActionValidator.ACTION_OPEN_APP,
+                    params = mapOf("app_name" to JsonPrimitive("YouTube"))
+                )
+            )
+        )
+
+        val result = validator.validate(plan, maxSteps = 20)
+        assertTrue(result.isValid)
+    }
+
+    @Test
+    fun fillSavedPasswordIsAllowed() {
+        val plan = ActionPlan(
+            steps = listOf(
+                PlanStep(
+                    action = ActionValidator.ACTION_FILL_SAVED_PASSWORD,
+                    params = mapOf("field_hint" to JsonPrimitive("Password"))
+                )
+            )
+        )
+
+        val result = validator.validate(plan, maxSteps = 20)
+        assertTrue(result.isValid)
+    }
 }

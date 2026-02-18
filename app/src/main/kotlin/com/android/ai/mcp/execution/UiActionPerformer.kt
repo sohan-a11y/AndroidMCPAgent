@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import com.android.ai.mcp.domain.PlanStep
+import com.android.ai.mcp.storage.automation.CredentialVaultRepository
 import com.android.ai.mcp.system.MCPAccessibilityService
 import com.android.ai.mcp.system.ScreenContextReader
 import kotlinx.coroutines.Dispatchers
@@ -17,7 +18,8 @@ import kotlinx.serialization.json.jsonPrimitive
 
 class UiActionPerformer(
     private val context: Context,
-    private val screenContextReader: ScreenContextReader
+    private val screenContextReader: ScreenContextReader,
+    private val credentialVaultRepository: CredentialVaultRepository
 ) {
 
     suspend fun execute(step: PlanStep): ActionExecutionResult {
@@ -30,6 +32,7 @@ class UiActionPerformer(
                 ActionValidator.ACTION_BACK -> executeBack()
                 ActionValidator.ACTION_HOME -> executeHome()
                 ActionValidator.ACTION_GET_SCREEN_TEXT -> executeGetScreenText()
+                ActionValidator.ACTION_FILL_SAVED_PASSWORD -> executeFillSavedPassword(step)
                 else -> ActionExecutionResult(success = false, errorMessage = "Unsupported action: ${step.action}")
             }
         }
@@ -37,9 +40,10 @@ class UiActionPerformer(
 
     private fun executeOpenApp(step: PlanStep): ActionExecutionResult {
         val packageName = step.params.stringParam("package_name")
+            ?: resolvePackageNameByAppName(step.params.stringParam("app_name"))
             ?: return ActionExecutionResult(
                 success = false,
-                errorMessage = "open_app missing package_name"
+                errorMessage = "open_app requires package_name or app_name"
             )
 
         val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
@@ -54,6 +58,74 @@ class UiActionPerformer(
         val payload = buildJsonObject {
             put("launched", JsonPrimitive(true))
             put("package_name", JsonPrimitive(packageName))
+        }
+
+        return ActionExecutionResult(success = true, resultJson = payload.toString())
+    }
+
+    private suspend fun executeFillSavedPassword(step: PlanStep): ActionExecutionResult {
+        if (!credentialVaultRepository.isSessionUnlocked()) {
+            return ActionExecutionResult(
+                success = false,
+                errorMessage = "Credential vault is locked. Unlock vault before execution."
+            )
+        }
+
+        val rootNode = rootNodeOrNull()
+            ?: return ActionExecutionResult(
+                success = false,
+                errorMessage = "Accessibility service or active window unavailable"
+            )
+
+        val appPackage = rootNode.packageName?.toString()
+            ?: return ActionExecutionResult(
+                success = false,
+                errorMessage = "Could not detect active package for credential lookup"
+            )
+
+        val fieldHint = step.params.stringParam("field_hint")
+        val accountHint = step.params.stringParam("account_hint")
+        val credential = credentialVaultRepository.resolveCredential(
+            appPackage = appPackage,
+            fieldHint = fieldHint,
+            accountHint = accountHint
+        ) ?: return ActionExecutionResult(
+            success = false,
+            errorMessage = "No saved credential matched package '$appPackage'"
+        )
+
+        val targetNode = if (!fieldHint.isNullOrBlank()) {
+            val candidates = mutableListOf<AccessibilityNodeInfo>()
+            findByText(rootNode, fieldHint.lowercase(), candidates)
+            candidates.firstOrNull { it.isEditable || it.className?.toString() == "android.widget.EditText" }
+        } else {
+            collectEditableNodes(rootNode).firstOrNull()
+        } ?: return ActionExecutionResult(
+            success = false,
+            errorMessage = "No editable field found for saved credential input"
+        )
+
+        targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+
+        val arguments = Bundle().apply {
+            putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                credential.password
+            )
+        }
+        val setTextResult = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        if (!setTextResult) {
+            return ActionExecutionResult(
+                success = false,
+                errorMessage = "Failed to fill saved password"
+            )
+        }
+
+        val payload = buildJsonObject {
+            put("credential_filled", JsonPrimitive(true))
+            put("account_label", JsonPrimitive(credential.accountLabel))
+            put("package_name", JsonPrimitive(credential.appPackage))
         }
 
         return ActionExecutionResult(success = true, resultJson = payload.toString())
@@ -298,5 +370,20 @@ class UiActionPerformer(
     private fun Map<String, JsonElement>.stringParam(key: String): String? {
         val primitive = this[key] as? JsonPrimitive ?: return null
         return primitive.jsonPrimitive.content.trim().takeIf { it.isNotEmpty() }
+    }
+
+    private fun resolvePackageNameByAppName(appName: String?): String? {
+        val trimmed = appName?.trim()?.lowercase().orEmpty()
+        if (trimmed.isEmpty()) return null
+
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val candidates = context.packageManager.queryIntentActivities(launcherIntent, 0)
+        return candidates.firstOrNull { resolveInfo ->
+            val label = resolveInfo.loadLabel(context.packageManager)?.toString()
+                ?.trim()
+                ?.lowercase()
+                .orEmpty()
+            label == trimmed || label.contains(trimmed)
+        }?.activityInfo?.packageName
     }
 }

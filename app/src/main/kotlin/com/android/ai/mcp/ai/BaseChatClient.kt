@@ -20,12 +20,12 @@ abstract class BaseChatClient(
 ) {
 
     protected abstract val endpointUrl: String
-    protected abstract val modelId: String
 
     protected open fun extraHeaders(): Map<String, String> = emptyMap()
 
     suspend fun generatePlan(
         apiKey: String,
+        modelId: String,
         systemPrompt: String,
         userPrompt: String
     ): PlanGenerationResponse {

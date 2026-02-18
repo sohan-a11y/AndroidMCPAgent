@@ -10,5 +10,7 @@ class PromptBuilderTest {
     fun includesDynamicMaxStepLimitInSystemPrompt() {
         val prompt = PromptBuilder().buildSystemPrompt(maxSteps = 8)
         assertTrue(prompt.contains("Return at most 8 steps"))
+        assertTrue(prompt.contains("Never output raw passwords"))
+        assertTrue(prompt.contains("fill_saved_password"))
     }
 }

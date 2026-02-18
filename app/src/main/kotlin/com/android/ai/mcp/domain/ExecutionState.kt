@@ -5,6 +5,7 @@ enum class ExecutionState {
     PLANNING,
     READY_FOR_CONFIRMATION,
     RUNNING,
+    AWAITING_USER,
     STOPPED,
     FAILED,
     COMPLETED

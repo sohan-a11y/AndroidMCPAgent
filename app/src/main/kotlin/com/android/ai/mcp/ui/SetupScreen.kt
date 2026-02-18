@@ -2,7 +2,14 @@ package com.android.ai.mcp.ui
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
@@ -12,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.android.ai.mcp.domain.AiProvider
+import com.android.ai.mcp.domain.WakeScope
 
 @Composable
 fun SetupScreen(
@@ -38,11 +47,27 @@ fun SetupScreen(
     onIncrementMaxSteps: () -> Unit,
     onDecrementMaxSteps: () -> Unit,
     onMaxStepsInputChanged: (String) -> Unit,
+    onOpenRouterModelInputChanged: (String) -> Unit,
+    onNvidiaModelInputChanged: (String) -> Unit,
+    onRefreshOpenRouterModels: () -> Unit,
+    onWakeWordChanged: (String) -> Unit,
+    onWakeEnabledChanged: (Boolean) -> Unit,
+    onWakeScopeChanged: (WakeScope) -> Unit,
+    onStartVoiceListeningNow: () -> Unit,
+    onStopVoiceListeningNow: () -> Unit,
+    onVaultTimeoutChanged: (String) -> Unit,
+    onRequestMicrophonePermission: () -> Unit,
+    onRequestVaultUnlock: () -> Unit,
+    onLockVault: () -> Unit,
     onDismissError: () -> Unit
 ) {
     val context = LocalContext.current
     var maxStepsInput by remember(uiState.settings.maxPlanSteps) {
         mutableStateOf(uiState.settings.maxPlanSteps.toString())
+    }
+    var modelSearch by remember { mutableStateOf("") }
+    var vaultTimeoutInput by remember(uiState.settings.vaultSessionTimeoutMinutes) {
+        mutableStateOf(uiState.settings.vaultSessionTimeoutMinutes.toString())
     }
 
     LaunchedEffect(Unit) {
@@ -61,11 +86,7 @@ fun SetupScreen(
                 Text("Accessibility", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    if (uiState.isAccessibilityEnabled) {
-                        "Enabled"
-                    } else {
-                        "Not enabled"
-                    },
+                    if (uiState.isAccessibilityEnabled) "Enabled" else "Not enabled",
                     color = if (uiState.isAccessibilityEnabled) {
                         MaterialTheme.colorScheme.primary
                     } else {
@@ -91,13 +112,12 @@ fun SetupScreen(
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Provider", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
-
-                ProviderOption(
+                RadioOption(
                     label = "OpenRouter",
                     selected = uiState.settings.selectedProvider == AiProvider.OPENROUTER,
                     onClick = { onProviderSelected(AiProvider.OPENROUTER) }
                 )
-                ProviderOption(
+                RadioOption(
                     label = "NVIDIA",
                     selected = uiState.settings.selectedProvider == AiProvider.NVIDIA,
                     onClick = { onProviderSelected(AiProvider.NVIDIA) }
@@ -145,6 +165,174 @@ fun SetupScreen(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
+                Text("Model Configuration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = uiState.settings.openRouterModelId,
+                    onValueChange = onOpenRouterModelInputChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("OpenRouter Model ID (free only)") },
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = uiState.settings.nvidiaModelId,
+                    onValueChange = onNvidiaModelInputChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("NVIDIA Model ID") },
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onRefreshOpenRouterModels,
+                        enabled = !uiState.isRefreshingOpenRouterModels
+                    ) {
+                        Text(if (uiState.isRefreshingOpenRouterModels) "Refreshing..." else "Refresh Free Models")
+                    }
+                    Text("Count: ${uiState.openRouterFreeModels.size}")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = modelSearch,
+                    onValueChange = { modelSearch = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Search free models") },
+                    singleLine = true
+                )
+
+                val filteredModels = uiState.openRouterFreeModels
+                    .filter { model ->
+                        modelSearch.isBlank() ||
+                            model.id.contains(modelSearch, ignoreCase = true) ||
+                            model.name.contains(modelSearch, ignoreCase = true)
+                    }
+                    .take(20)
+
+                if (filteredModels.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    filteredModels.forEach { model ->
+                        OutlinedButton(
+                            onClick = { onOpenRouterModelInputChanged(model.id) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("${model.name} (${model.id})")
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+
+                if (!uiState.modelValidationMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        uiState.modelValidationMessage!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Voice Wake", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Wake Enabled")
+                    Switch(
+                        checked = uiState.settings.wakeEnabled,
+                        onCheckedChange = onWakeEnabledChanged
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = uiState.settings.wakeWord,
+                    onValueChange = onWakeWordChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Wake Word") },
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Wake Scope", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                RadioOption(
+                    label = "Always-on foreground service",
+                    selected = uiState.settings.wakeScope == WakeScope.ALWAYS_ON_FOREGROUND,
+                    onClick = { onWakeScopeChanged(WakeScope.ALWAYS_ON_FOREGROUND) }
+                )
+                RadioOption(
+                    label = "Only while app open",
+                    selected = uiState.settings.wakeScope == WakeScope.APP_OPEN_ONLY,
+                    onClick = { onWakeScopeChanged(WakeScope.APP_OPEN_ONLY) }
+                )
+                RadioOption(
+                    label = "Manual start only",
+                    selected = uiState.settings.wakeScope == WakeScope.MANUAL_START,
+                    onClick = { onWakeScopeChanged(WakeScope.MANUAL_START) }
+                )
+
+                if (uiState.settings.wakeScope == WakeScope.MANUAL_START) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onStartVoiceListeningNow) {
+                            Text("Start Listening")
+                        }
+                        OutlinedButton(onClick = onStopVoiceListeningNow) {
+                            Text("Stop Listening")
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(onClick = onRequestMicrophonePermission) {
+                    Text("Grant Microphone Permission")
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Vault Security", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    if (uiState.isVaultUnlocked) "Vault status: Unlocked" else "Vault status: Locked",
+                    color = if (uiState.isVaultUnlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = vaultTimeoutInput,
+                    onValueChange = {
+                        vaultTimeoutInput = it
+                        onVaultTimeoutChanged(it)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Session timeout minutes (1-30)") },
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onRequestVaultUnlock) {
+                        Text("Unlock With Biometrics")
+                    }
+                    OutlinedButton(onClick = onLockVault) {
+                        Text("Lock Now")
+                    }
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Text("Max Steps Per Plan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -184,10 +372,6 @@ fun SetupScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Current: ${uiState.settings.maxPlanSteps}")
-                Text("Step delay: ${uiState.settings.stepDelayMs}ms")
             }
         }
 
@@ -207,7 +391,7 @@ fun SetupScreen(
 }
 
 @Composable
-private fun ProviderOption(
+private fun RadioOption(
     label: String,
     selected: Boolean,
     onClick: () -> Unit

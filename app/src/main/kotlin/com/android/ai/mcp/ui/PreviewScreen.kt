@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.android.ai.mcp.domain.AiProvider
+import com.android.ai.mcp.execution.ActionValidator
 
 @Composable
 fun PreviewScreen(
@@ -44,8 +46,17 @@ fun PreviewScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        val provider = uiState.settings.selectedProvider
+        val modelId = when (provider) {
+            AiProvider.OPENROUTER -> uiState.settings.openRouterModelId
+            AiProvider.NVIDIA -> uiState.settings.nvidiaModelId
+        }
+        val maxSteps = uiState.pendingMaxPlanSteps ?: uiState.settings.maxPlanSteps
         Text("Action Preview", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Steps: ${plan.steps.size} / Max: ${uiState.settings.maxPlanSteps}")
+        Text("Provider: ${provider.value}")
+        Text("Model: $modelId")
+        Text("Source: ${uiState.pendingCommandSource.value}")
+        Text("Steps: ${plan.steps.size} / Max: $maxSteps")
         Text(
             "Review all actions before execution. Confirmation is mandatory.",
             style = MaterialTheme.typography.bodySmall,
@@ -69,7 +80,11 @@ fun PreviewScreen(
                         if (step.params.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = step.params.toString(),
+                                text = if (step.action == ActionValidator.ACTION_FILL_SAVED_PASSWORD) {
+                                    "Saved credential fill (masked)"
+                                } else {
+                                    step.params.toString()
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace
                             )

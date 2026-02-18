@@ -118,6 +118,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.activity.compose)
     implementation(libs.navigation.compose)
+    implementation(libs.androidx.biometric)
 
     // Tests
     testImplementation(libs.junit4)

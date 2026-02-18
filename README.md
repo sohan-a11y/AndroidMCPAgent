@@ -1,25 +1,50 @@
 # Android AI MCP
 
-Android AI MCP is a personal Android app that uses Accessibility APIs and a cloud LLM planner to execute user-confirmed UI action plans.
+Android AI MCP is a personal Android automation app that uses Accessibility APIs and cloud LLM planning, with mandatory preview/confirmation before execution.
 
 ## Core flow
-1. Add provider API keys in Setup.
+1. Configure provider keys and model IDs in Setup.
 2. Enable Accessibility service.
-3. Enter a natural-language command.
-4. Generate an AI action plan.
+3. Enter command manually, by voice wake, or from a saved template.
+4. Generate plan (validated against configured max steps).
 5. Review preview and confirm execution.
-6. Track results in Logs.
+6. Track runs in Logs.
 
-## Providers
-- OpenRouter: `moonshotai/kimi-k2.5`
-- NVIDIA NIM: `moonshotai/kimi-k2.5`
+## Providers and models
+- OpenRouter (strict free-model policy)
+- NVIDIA NIM
 
-Provider selection is manual in-app, and the selected provider key is required.
+Model ID selection is runtime-configurable:
+- OpenRouter model ID: stored in app settings (`openRouterModelId`)
+- NVIDIA model ID: stored in app settings (`nvidiaModelId`)
+
+OpenRouter free enforcement:
+1. App fetches OpenRouter model catalog and filters models with zero prompt + completion price.
+2. If catalog is unavailable, only `:free` model IDs are allowed.
+3. If catalog is available and selected model is not free, plan generation is blocked.
+
+## Voice wake
+- On-device Android SpeechRecognizer
+- Wake word configurable (default `AI`)
+- Voice service runs as a foreground microphone service when enabled
+- Voice commands still require in-app preview confirmation before execution
+
+## Templates
+- Save command + provider + model + limits as reusable templates
+- Run templates repeatedly from Templates tab
+
+## Credential vault
+- Encrypted password storage with Android Keystore AES-GCM
+- Match by `appPackage + fieldHint + accountHint`
+- Biometric session unlock required before fills
+- `fill_saved_password` steps require explicit runtime approval
+- No plaintext passwords are written to logs
 
 ## Safety controls
 - Mandatory plan preview before execution
 - Stop execution button
-- Configurable max step limit in settings (`1-50`, default `20`)
+- Manual handoff mode when secure/blocked screens are detected
+- Configurable max step limit (`1-50`, default `20`)
 - Sequential execution with delay (default `700ms`)
 
 ## Build requirements

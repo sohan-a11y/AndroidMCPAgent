@@ -9,5 +9,4 @@ class NvidiaClient(
 ) : BaseChatClient(httpClient, json) {
 
     override val endpointUrl: String = "https://integrate.api.nvidia.com/v1/chat/completions"
-    override val modelId: String = "moonshotai/kimi-k2.5"
 }

@@ -76,6 +76,7 @@ private fun RunLogCard(run: CommandRunEntity) {
     val statusColor = when (run.status) {
         "completed" -> MaterialTheme.colorScheme.primary
         "failed", "validation_failed" -> MaterialTheme.colorScheme.error
+        "awaiting_user" -> MaterialTheme.colorScheme.tertiary
         "stopped" -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -104,7 +105,17 @@ private fun RunLogCard(run: CommandRunEntity) {
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
-                "provider=${run.provider}, steps=${run.planStepCount}, max=${run.maxPlanSteps}",
+                "provider=${run.provider}, model=${run.modelId}",
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                "source=${run.commandSource}, template=${run.templateId ?: "-"}",
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                "steps=${run.planStepCount}, max=${run.maxPlanSteps}",
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall
             )

@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.android.ai.mcp.domain.AiProvider
 import com.android.ai.mcp.domain.ExecutionState
 
 @Composable
@@ -27,9 +28,13 @@ fun CommandScreen(
     onCommandChanged: (String) -> Unit,
     onGeneratePlan: () -> Unit,
     onStopExecution: () -> Unit,
+    onResumeExecution: () -> Unit,
+    onApproveCredentialFill: () -> Unit,
+    onRejectCredentialFill: () -> Unit,
     onDismissError: () -> Unit
 ) {
     val isRunning = uiState.executionState == ExecutionState.RUNNING
+    val isAwaitingUser = uiState.executionState == ExecutionState.AWAITING_USER
 
     Column(
         modifier = Modifier
@@ -53,7 +58,13 @@ fun CommandScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Provider: ${uiState.settings.selectedProvider.value}")
+                val selectedModel = when (uiState.settings.selectedProvider) {
+                    AiProvider.OPENROUTER -> uiState.settings.openRouterModelId
+                    AiProvider.NVIDIA -> uiState.settings.nvidiaModelId
+                }
+                Text("Model: $selectedModel")
                 Text("Max steps: ${uiState.settings.maxPlanSteps}")
+                Text("Pending source: ${uiState.pendingCommandSource.value}")
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
@@ -94,6 +105,39 @@ fun CommandScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedButton(onClick = onStopExecution) {
                         Text("Stop Execution")
+                    }
+                }
+
+                if (isAwaitingUser) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(onClick = onResumeExecution) {
+                        Text("Resume After Manual Unlock")
+                    }
+                }
+            }
+        }
+
+        val credentialPrompt = uiState.pendingCredentialFillPrompt
+        if (credentialPrompt != null) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Credential Fill Confirmation", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("App: ${credentialPrompt.appPackage}")
+                    Text("Step: ${credentialPrompt.stepNumber}/${credentialPrompt.totalSteps}")
+                    if (!credentialPrompt.fieldHint.isNullOrBlank()) {
+                        Text("Field hint: ${credentialPrompt.fieldHint}")
+                    }
+                    if (!credentialPrompt.accountHint.isNullOrBlank()) {
+                        Text("Account hint: ${credentialPrompt.accountHint}")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(onClick = onApproveCredentialFill) {
+                        Text("Approve Fill")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(onClick = onRejectCredentialFill) {
+                        Text("Reject Fill")
                     }
                 }
             }

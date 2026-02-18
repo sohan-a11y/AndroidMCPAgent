@@ -36,7 +36,9 @@ function Find-Adb {
         return $adbCmd.Source
     }
 
+    $repoRoot = Split-Path -Parent $PSScriptRoot
     $common = @(
+        (Join-Path $repoRoot 'tools\platform-tools\adb.exe'),
         "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe",
         "C:\Android\platform-tools\adb.exe"
     )
@@ -56,9 +58,46 @@ function Run-External {
         [Parameter(Mandatory = $true)][string[]]$Args
     )
 
-    $output = & $Exe @Args 2>&1
+    $oldPreference = $ErrorActionPreference
+    try {
+        # adb writes daemon startup logs to stderr even when command succeeds.
+        # Keep processing output and let callers decide based on command text.
+        $ErrorActionPreference = 'SilentlyContinue'
+        $output = & $Exe @Args 2>&1
+    }
+    finally {
+        $ErrorActionPreference = $oldPreference
+    }
+
     $text = ($output | Out-String).Trim()
     return $text
+}
+
+function Write-PackagePresenceForUser {
+    param(
+        [Parameter(Mandatory = $true)][string]$AdbExe,
+        [Parameter(Mandatory = $true)][int]$UserId,
+        [Parameter(Mandatory = $true)][string[]]$Packages
+    )
+
+    Write-Host "User ${UserId}:"
+    $packagesOutput = Run-External -Exe $AdbExe -Args @('shell', 'pm', 'list', 'packages', '--user', "$UserId")
+    $packageLines = $packagesOutput -split '\r?\n'
+    $found = @()
+
+    foreach ($pkg in $Packages) {
+        $needle = "package:$pkg"
+        if ($packageLines -contains $needle) {
+            $found += $needle
+        }
+    }
+
+    if ($found.Count -eq 0) {
+        Write-Host '  (none)'
+        return
+    }
+
+    $found | ForEach-Object { Write-Host "  $_" }
 }
 
 function Find-InstallErrorCode {
@@ -128,7 +167,9 @@ Write-Host (Run-External -Exe $adb -Args @('version'))
 Write-Host (Run-External -Exe $adb -Args @('devices', '-l'))
 
 Write-Section 'Pre-install package visibility'
-Write-Host (Run-External -Exe $adb -Args @('shell', 'pm', 'list', 'packages') | Select-String -Pattern $ReleasePackage,$DebugPackage -SimpleMatch)
+foreach ($userId in $UsersToCheck) {
+    Write-PackagePresenceForUser -AdbExe $adb -UserId $userId -Packages @($ReleasePackage, $DebugPackage)
+}
 
 Write-Section 'Primary install attempt'
 $installOutput = Run-External -Exe $adb -Args @('install', '-r', $resolvedApk)
@@ -137,7 +178,10 @@ Write-Host $installOutput
 if ($installOutput -match '^Success' -or $installOutput -match '\bSuccess\b') {
     Write-Section 'Install result'
     Write-Host 'Install succeeded.'
-    Write-Host (Run-External -Exe $adb -Args @('shell', 'dumpsys', 'package', $ReleasePackage) | Select-String -Pattern 'versionCode=|versionName=' -CaseSensitive:$false)
+    $packageDump = Run-External -Exe $adb -Args @('shell', 'dumpsys', 'package', $ReleasePackage)
+    $packageDump -split '\r?\n' |
+        Where-Object { $_ -match 'versionCode=|versionName=' } |
+        ForEach-Object { Write-Host $_ }
     exit 0
 }
 
@@ -166,7 +210,7 @@ switch ($errorCode) {
         Write-Host $usersOutput
 
         foreach ($userId in $UsersToCheck) {
-            Write-Host (Run-External -Exe $adb -Args @('shell', 'pm', 'list', 'packages', '--user', "$userId") | Select-String -Pattern $ReleasePackage,$DebugPackage -SimpleMatch)
+            Write-PackagePresenceForUser -AdbExe $adb -UserId $userId -Packages @($ReleasePackage, $DebugPackage)
         }
 
         if ($ApplyFix) {
@@ -217,4 +261,6 @@ switch ($errorCode) {
 }
 
 Write-Section 'Post-check package state'
-Write-Host (Run-External -Exe $adb -Args @('shell', 'pm', 'list', 'packages') | Select-String -Pattern $ReleasePackage,$DebugPackage -SimpleMatch)
+foreach ($userId in $UsersToCheck) {
+    Write-PackagePresenceForUser -AdbExe $adb -UserId $userId -Packages @($ReleasePackage, $DebugPackage)
+}

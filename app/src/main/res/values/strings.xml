@@ -7,9 +7,19 @@
     <string name="notification_channel_description">Shown while AI action execution is running</string>
     <string name="notification_title">Android AI MCP Running</string>
     <string name="notification_text">Executing confirmed action plan</string>
+    <string name="voice_channel_name">AI MCP Voice Wake</string>
+    <string name="voice_channel_description">Shown while voice wake listening is active</string>
+    <string name="voice_notification_title">Voice Wake Active</string>
+    <string name="voice_notification_text">Listening for wake word: %1$s</string>
+    <string name="plan_ready_channel_name">AI MCP Plan Ready</string>
+    <string name="plan_ready_channel_description">Shown when a voice command plan is ready for confirmation</string>
+    <string name="plan_ready_title">Plan Ready For Review</string>
+    <string name="plan_ready_text">Command: %1$s</string>
 
     <string name="tab_setup">Setup</string>
     <string name="tab_command">Command</string>
+    <string name="tab_templates">Templates</string>
+    <string name="tab_vault">Vault</string>
     <string name="tab_logs">Logs</string>
 
     <string name="provider_openrouter">OpenRouter</string>

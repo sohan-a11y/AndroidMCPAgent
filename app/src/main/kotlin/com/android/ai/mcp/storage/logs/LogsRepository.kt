@@ -2,6 +2,7 @@ package com.android.ai.mcp.storage.logs
 
 import com.android.ai.mcp.domain.ActionPlan
 import com.android.ai.mcp.domain.AiProvider
+import com.android.ai.mcp.domain.CommandSource
 import com.android.ai.mcp.domain.PlanStep
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
@@ -19,6 +20,9 @@ class LogsRepository(
     suspend fun createRun(
         commandText: String,
         provider: AiProvider,
+        modelId: String,
+        commandSource: CommandSource,
+        templateId: Long?,
         rawPlanJson: String,
         validatedPlan: ActionPlan?,
         maxPlanSteps: Int,
@@ -29,6 +33,9 @@ class LogsRepository(
         val entity = CommandRunEntity(
             commandText = commandText,
             provider = provider.value,
+            modelId = modelId,
+            commandSource = commandSource.value,
+            templateId = templateId,
             rawPlanJson = rawPlanJson,
             validatedPlanJson = validatedPlan?.let { json.encodeToString(it) },
             status = status,

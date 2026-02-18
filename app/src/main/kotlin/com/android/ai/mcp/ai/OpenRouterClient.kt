@@ -9,7 +9,6 @@ class OpenRouterClient(
 ) : BaseChatClient(httpClient, json) {
 
     override val endpointUrl: String = "https://openrouter.ai/api/v1/chat/completions"
-    override val modelId: String = "moonshotai/kimi-k2.5"
 
     override fun extraHeaders(): Map<String, String> {
         return mapOf(

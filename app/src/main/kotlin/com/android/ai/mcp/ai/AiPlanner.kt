@@ -12,6 +12,7 @@ class AiPlanner(
 
     data class PlanningResult(
         val actionPlan: ActionPlan,
+        val modelId: String,
         val normalizedPlanJson: String,
         val extractedPlanJson: String,
         val rawModelOutput: String,
@@ -20,6 +21,7 @@ class AiPlanner(
 
     suspend fun generatePlan(
         provider: AiProvider,
+        modelId: String,
         apiKey: String,
         command: String,
         screenContext: String,
@@ -30,17 +32,18 @@ class AiPlanner(
 
         val providerResponse = when (provider) {
             AiProvider.OPENROUTER -> {
-                openRouterClient.generatePlan(apiKey, systemPrompt, userPrompt)
+                openRouterClient.generatePlan(apiKey, modelId, systemPrompt, userPrompt)
             }
 
             AiProvider.NVIDIA -> {
-                nvidiaClient.generatePlan(apiKey, systemPrompt, userPrompt)
+                nvidiaClient.generatePlan(apiKey, modelId, systemPrompt, userPrompt)
             }
         }
 
         val parsed = actionPlanParser.parse(providerResponse.modelContent)
         return PlanningResult(
             actionPlan = parsed.actionPlan,
+            modelId = modelId,
             normalizedPlanJson = parsed.normalizedJson,
             extractedPlanJson = parsed.extractedJson,
             rawModelOutput = providerResponse.modelContent,

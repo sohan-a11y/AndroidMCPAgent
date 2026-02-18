@@ -4,6 +4,12 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 class ScreenContextReader {
 
+    fun currentPackageName(): String? {
+        val service = MCPAccessibilityService.instance ?: return null
+        val rootNode = service.rootInActiveWindow ?: return null
+        return rootNode.packageName?.toString()
+    }
+
     fun buildContextForPlanner(maxChars: Int = 4000): String {
         val service = MCPAccessibilityService.instance
             ?: return "Accessibility service not enabled"

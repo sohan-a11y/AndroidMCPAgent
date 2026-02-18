@@ -12,3 +12,6 @@ local.properties
 keystore.properties
 *.jks
 *.keystore
+app-release.apk
+triage-run.log
+tools/
