@@ -26,6 +26,8 @@ val releaseStoreFile = signingValue("storeFile", "ANDROID_AI_MCP_STORE_FILE")
 val releaseStorePassword = signingValue("storePassword", "ANDROID_AI_MCP_STORE_PASSWORD")
 val releaseKeyAlias = signingValue("keyAlias", "ANDROID_AI_MCP_KEY_ALIAS")
 val releaseKeyPassword = signingValue("keyPassword", "ANDROID_AI_MCP_KEY_PASSWORD")
+val ciVersionCode = providers.gradleProperty("ciVersionCode").orNull?.toIntOrNull()
+val ciSignDebug = providers.gradleProperty("ciSignDebug").orNull?.toBooleanStrictOrNull() ?: false
 
 val hasReleaseSigningConfig = !releaseStoreFile.isNullOrBlank() &&
     !releaseStorePassword.isNullOrBlank() &&
@@ -40,7 +42,7 @@ android {
         applicationId = "com.android.ai.mcp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = ciVersionCode ?: 1
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -62,6 +64,11 @@ android {
             // Use default debug signing (auto-generated debug.keystore)
             // This is usually automatic, but being explicit helps CI
             isDebuggable = true
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            if (ciSignDebug && hasReleaseSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         release {
             signingConfig = signingConfigs.getByName("release")
