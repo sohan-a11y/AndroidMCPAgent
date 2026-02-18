@@ -72,3 +72,20 @@ One-time migration if older conflicting installs exist:
 1. Uninstall `com.android.ai.mcp`
 2. Uninstall `com.android.ai.mcp.debug`
 3. Install the latest signed release APK
+
+## Android install triage script (Windows)
+Use this script to capture exact `INSTALL_FAILED_*` output and apply deterministic fixes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\triage-android-install.ps1 -ApkPath "C:\path\to\app-release.apk"
+```
+
+If you hit `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and want automatic cleanup across users:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\triage-android-install.ps1 -ApkPath "C:\path\to\app-release.apk" -ApplyFix
+```
+
+Notes:
+- Script checks `com.android.ai.mcp` and `com.android.ai.mcp.debug`.
+- Pass `-AdbPath "C:\path\to\adb.exe"` if `adb` is not on PATH.
