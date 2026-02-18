@@ -43,6 +43,7 @@ data class McpUiState(
     val credentialUsernameInput: String = "",
     val credentialPasswordInput: String = "",
     val isVaultUnlocked: Boolean = false,
+    val isMicrophonePermissionGranted: Boolean = false,
     val pendingCredentialFillPrompt: CredentialFillPrompt? = null,
     val logs: List<CommandRunEntity> = emptyList(),
     val errorMessage: String? = null

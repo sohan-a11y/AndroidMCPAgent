@@ -255,6 +255,20 @@ fun SetupScreen(
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = if (uiState.isMicrophonePermissionGranted) {
+                        "Microphone permission: Granted"
+                    } else {
+                        "Microphone permission: Not granted"
+                    },
+                    color = if (uiState.isMicrophonePermissionGranted) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = uiState.settings.wakeWord,
                     onValueChange = onWakeWordChanged,

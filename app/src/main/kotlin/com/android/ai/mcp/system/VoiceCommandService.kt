@@ -13,9 +13,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.android.ai.mcp.R
@@ -24,8 +26,10 @@ import com.android.ai.mcp.ui.MainActivity
 class VoiceCommandService : Service() {
 
     companion object {
+        private const val TAG = "VoiceCommandService"
         private const val CHANNEL_ID = "mcp_voice_channel"
         private const val NOTIFICATION_ID = 4343
+        private const val DUPLICATE_SUPPRESSION_WINDOW_MS = 1800L
 
         private const val ACTION_START = "com.android.ai.mcp.voice.START"
         private const val ACTION_STOP = "com.android.ai.mcp.voice.STOP"
@@ -47,10 +51,7 @@ class VoiceCommandService : Service() {
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, VoiceCommandService::class.java).apply {
-                action = ACTION_STOP
-            }
-            context.startService(intent)
+            context.stopService(Intent(context, VoiceCommandService::class.java))
         }
     }
 
@@ -59,6 +60,8 @@ class VoiceCommandService : Service() {
     private var wakeWord: String = "AI"
     private var awaitingCommandAfterWake = false
     private var restartBackoffMs = 700L
+    private var lastDispatchedCommandNormalized = ""
+    private var lastDispatchedAtMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -71,17 +74,27 @@ class VoiceCommandService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 wakeWord = intent.getStringExtra(EXTRA_WAKE_WORD)?.trim().takeUnless { it.isNullOrEmpty() } ?: "AI"
-                startForeground(NOTIFICATION_ID, buildNotification())
-                startListeningLoop()
+                awaitingCommandAfterWake = false
+                if (!hasRecordAudioPermission()) {
+                    Log.w(TAG, "Ignoring voice service start: RECORD_AUDIO permission not granted")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                if (!startForegroundAndListeningSafely()) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
             }
 
             ACTION_STOP -> {
-                stopListeningLoop()
-                stopForegroundCompat()
+                stopSelf()
+            }
+
+            else -> {
                 stopSelf()
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -102,8 +115,14 @@ class VoiceCommandService : Service() {
         }
 
         if (speechRecognizer == null) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-                setRecognitionListener(recognitionListener)
+            try {
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                    setRecognitionListener(recognitionListener)
+                }
+            } catch (e: RuntimeException) {
+                Log.e(TAG, "Failed to create SpeechRecognizer", e)
+                stopSelf()
+                return
             }
         }
 
@@ -118,11 +137,26 @@ class VoiceCommandService : Service() {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
-        recognizer.cancel()
-        recognizer.startListening(intent)
+        try {
+            recognizer.cancel()
+            recognizer.startListening(intent)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Security exception while starting listening", e)
+            stopSelf()
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "SpeechRecognizer illegal state, retrying", e)
+            scheduleRestart()
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "SpeechRecognizer runtime failure, retrying", e)
+            scheduleRestart()
+        }
     }
 
     private fun scheduleRestart() {
+        if (speechRecognizer == null || !hasRecordAudioPermission()) {
+            stopSelf()
+            return
+        }
         val delayMs = restartBackoffMs.coerceAtMost(5_000L)
         mainHandler.postDelayed(
             { startListening() },
@@ -188,9 +222,23 @@ class VoiceCommandService : Service() {
     }
 
     private fun dispatchVoiceCommand(command: String) {
+        val trimmedCommand = command.trim()
+        if (trimmedCommand.isEmpty()) return
+        val normalized = trimmedCommand.lowercase()
+        val now = SystemClock.elapsedRealtime()
+        if (
+            normalized == lastDispatchedCommandNormalized &&
+            now - lastDispatchedAtMs < DUPLICATE_SUPPRESSION_WINDOW_MS
+        ) {
+            return
+        }
+
+        lastDispatchedCommandNormalized = normalized
+        lastDispatchedAtMs = now
+
         val broadcast = Intent(ACTION_VOICE_COMMAND).apply {
             `package` = packageName
-            putExtra(EXTRA_COMMAND_TEXT, command.trim())
+            putExtra(EXTRA_COMMAND_TEXT, trimmedCommand)
         }
         sendBroadcast(broadcast)
     }
@@ -200,6 +248,31 @@ class VoiceCommandService : Service() {
             this,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startForegroundAndListeningSafely(): Boolean {
+        return try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+            startListeningLoop()
+            true
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Unable to start microphone foreground service", e)
+            false
+        } catch (e: IllegalStateException) {
+            Log.e(TAG, "Illegal state starting voice foreground service", e)
+            false
+        } catch (e: RuntimeException) {
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                e is android.app.ForegroundServiceStartNotAllowedException
+            ) {
+                Log.e(TAG, "Foreground service start denied by system state", e)
+                false
+            } else {
+                Log.e(TAG, "Unexpected runtime error starting voice service", e)
+                false
+            }
+        }
     }
 
     private fun createNotificationChannel() {

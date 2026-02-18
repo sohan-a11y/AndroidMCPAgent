@@ -1,10 +1,12 @@
 package com.android.ai.mcp.ui
 
+import android.Manifest
 import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,7 +16,6 @@ import com.android.ai.mcp.domain.CommandSource
 import com.android.ai.mcp.domain.ExecutionState
 import com.android.ai.mcp.domain.WakeScope
 import com.android.ai.mcp.execution.ActionExecutor
-import com.android.ai.mcp.execution.ActionValidator
 import com.android.ai.mcp.storage.automation.TaskTemplateEntity
 import com.android.ai.mcp.system.ExecutionForegroundService
 import com.android.ai.mcp.system.MCPAccessibilityService
@@ -48,10 +49,18 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
 
     @Volatile
     private var stopRequested = false
+    private var pendingWakeEnableAfterPermission = false
+    private var isHostForeground = false
 
     private val voiceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != VoiceCommandService.ACTION_VOICE_COMMAND) return
+            if (isVoiceWorkflowBusy()) {
+                _uiState.update {
+                    it.copy(executionMessage = "Voice command ignored: agent is busy")
+                }
+                return
+            }
             val command = intent.getStringExtra(VoiceCommandService.EXTRA_COMMAND_TEXT)?.trim().orEmpty()
             if (command.isNotEmpty()) {
                 onCommandTextChanged(command)
@@ -144,8 +153,27 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onWakeEnabledChanged(enabled: Boolean) {
+        if (!enabled) {
+            pendingWakeEnableAfterPermission = false
+            viewModelScope.launch {
+                app.settingsRepository.setWakeEnabled(false)
+            }
+            return
+        }
+
+        val context = getApplication<Application>()
+        if (hasMicrophonePermission(context)) {
+            pendingWakeEnableAfterPermission = false
+            viewModelScope.launch {
+                app.settingsRepository.setWakeEnabled(true)
+            }
+            return
+        }
+
+        pendingWakeEnableAfterPermission = true
         viewModelScope.launch {
-            app.settingsRepository.setWakeEnabled(enabled)
+            app.settingsRepository.setWakeEnabled(false)
+            _events.emit(UiEvent.RequestMicrophonePermission)
         }
     }
 
@@ -156,12 +184,50 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startVoiceListeningNow() {
+        val context = getApplication<Application>()
+        if (!hasMicrophonePermission(context)) {
+            pendingWakeEnableAfterPermission = false
+            viewModelScope.launch {
+                _events.emit(UiEvent.RequestMicrophonePermission)
+            }
+            _uiState.update { it.copy(errorMessage = "Microphone permission is required for voice listening") }
+            return
+        }
         val settings = _uiState.value.settings
-        VoiceCommandService.start(getApplication(), settings.wakeWord)
+        VoiceCommandService.start(context, settings.wakeWord)
     }
 
     fun stopVoiceListeningNow() {
         VoiceCommandService.stop(getApplication())
+    }
+
+    fun onMicrophonePermissionResult(granted: Boolean) {
+        _uiState.update { it.copy(isMicrophonePermissionGranted = granted) }
+        if (granted) {
+            if (pendingWakeEnableAfterPermission) {
+                pendingWakeEnableAfterPermission = false
+                viewModelScope.launch {
+                    app.settingsRepository.setWakeEnabled(true)
+                }
+            } else {
+                syncVoiceService(_uiState.value.settings)
+            }
+            return
+        }
+
+        pendingWakeEnableAfterPermission = false
+        viewModelScope.launch {
+            app.settingsRepository.setWakeEnabled(false)
+        }
+        _uiState.update { it.copy(errorMessage = "Microphone permission denied") }
+        syncVoiceService(_uiState.value.settings)
+    }
+
+    fun onHostForegroundChanged(isForeground: Boolean) {
+        isHostForeground = isForeground
+        val micGranted = hasMicrophonePermission(getApplication())
+        _uiState.update { it.copy(isMicrophonePermissionGranted = micGranted) }
+        syncVoiceService(_uiState.value.settings)
     }
 
     fun onVaultSessionTimeoutChanged(value: String) {
@@ -592,8 +658,16 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeSettings() {
         viewModelScope.launch {
             app.settingsRepository.getSettings().collectLatest { settings ->
+                val micGranted = hasMicrophonePermission(getApplication())
                 _uiState.update { state ->
-                    state.copy(settings = settings)
+                    state.copy(
+                        settings = settings,
+                        isMicrophonePermissionGranted = micGranted
+                    )
+                }
+                if (!micGranted && settings.wakeEnabled) {
+                    pendingWakeEnableAfterPermission = false
+                    app.settingsRepository.setWakeEnabled(false)
                 }
                 syncVaultState()
                 syncVoiceService(settings)
@@ -636,9 +710,15 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun syncVoiceService(settings: com.android.ai.mcp.domain.AppSettings) {
         val context = getApplication<Application>()
+        if (!hasMicrophonePermission(context)) {
+            VoiceCommandService.stop(context)
+            return
+        }
+
         when {
             !settings.wakeEnabled -> VoiceCommandService.stop(context)
             settings.wakeScope == WakeScope.MANUAL_START -> VoiceCommandService.stop(context)
+            settings.wakeScope == WakeScope.APP_OPEN_ONLY && !isHostForeground -> VoiceCommandService.stop(context)
             else -> VoiceCommandService.start(context, settings.wakeWord)
         }
     }
@@ -665,6 +745,26 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
             AiProvider.OPENROUTER -> state.settings.openRouterModelId
             AiProvider.NVIDIA -> state.settings.nvidiaModelId
         }
+    }
+
+    private fun isVoiceWorkflowBusy(): Boolean {
+        val state = _uiState.value
+        if (state.isPlanning) return true
+        return when (state.executionState) {
+            ExecutionState.PLANNING,
+            ExecutionState.READY_FOR_CONFIRMATION,
+            ExecutionState.RUNNING,
+            ExecutionState.AWAITING_USER -> true
+
+            else -> false
+        }
+    }
+
+    private fun hasMicrophonePermission(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun generatePlanFromCommand(

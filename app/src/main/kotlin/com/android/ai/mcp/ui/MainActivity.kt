@@ -45,6 +45,16 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        viewModel.onHostForegroundChanged(true)
+    }
+
+    override fun onStop() {
+        viewModel.onHostForegroundChanged(false)
+        super.onStop()
+    }
 }
 
 private object Routes {
@@ -72,6 +82,7 @@ private fun AndroidAiMcpApp(
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
+        viewModel.onMicrophonePermissionResult(granted)
         if (!granted) {
             viewModel.showError("Microphone permission denied")
         }
@@ -91,6 +102,9 @@ private fun AndroidAiMcpApp(
                             }
                         }
                     )
+                }
+                UiEvent.RequestMicrophonePermission -> {
+                    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
         }
