@@ -11,7 +11,6 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -105,11 +104,36 @@ private fun AndroidAiMcpApp(
         bottomBar = {
             if (currentRoute in Routes.BottomTabs) {
                 NavigationBar {
-                    NavTabItem(route = Routes.Setup, label = "Setup", currentRoute = currentRoute, navController = navController)
-                    NavTabItem(route = Routes.Command, label = "Command", currentRoute = currentRoute, navController = navController)
-                    NavTabItem(route = Routes.Templates, label = "Templates", currentRoute = currentRoute, navController = navController)
-                    NavTabItem(route = Routes.Vault, label = "Vault", currentRoute = currentRoute, navController = navController)
-                    NavTabItem(route = Routes.Logs, label = "Logs", currentRoute = currentRoute, navController = navController)
+                    BottomTabItem(
+                        route = Routes.Setup,
+                        label = "Setup",
+                        currentRoute = currentRoute,
+                        navController = navController
+                    )
+                    BottomTabItem(
+                        route = Routes.Command,
+                        label = "Command",
+                        currentRoute = currentRoute,
+                        navController = navController
+                    )
+                    BottomTabItem(
+                        route = Routes.Templates,
+                        label = "Templates",
+                        currentRoute = currentRoute,
+                        navController = navController
+                    )
+                    BottomTabItem(
+                        route = Routes.Vault,
+                        label = "Vault",
+                        currentRoute = currentRoute,
+                        navController = navController
+                    )
+                    BottomTabItem(
+                        route = Routes.Logs,
+                        label = "Logs",
+                        currentRoute = currentRoute,
+                        navController = navController
+                    )
                 }
             }
         }
@@ -214,13 +238,13 @@ private fun AndroidAiMcpApp(
 }
 
 @Composable
-private fun NavTabItem(
+private fun BottomTabItem(
     route: String,
     label: String,
     currentRoute: String,
     navController: androidx.navigation.NavHostController
 ) {
-    NavigationBarItem(
+    androidx.compose.material3.NavigationBarItem(
         selected = currentRoute == route,
         onClick = {
             navController.navigate(route) {
