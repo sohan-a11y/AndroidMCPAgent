@@ -52,7 +52,7 @@ Then run:
 
 ## GitHub Actions signing secrets
 The workflow requires these repository secrets:
-- `KEYSTORE_BASE64`
+- `KEYSTORE_BASE64` (raw base64 string only, not `KEYSTORE_BASE64=...`)
 - `KEY_ALIAS`
 - `KEY_PASSWORD`
 - `STORE_PASSWORD`

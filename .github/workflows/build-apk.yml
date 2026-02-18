@@ -62,7 +62,24 @@ jobs:
 
       - name: Decode keystore
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/release-keystore.jks"
+          set -euo pipefail
+          B64="$KEYSTORE_BASE64"
+          # Accept either raw base64 or an accidental "KEYSTORE_BASE64=<value>" paste.
+          B64="${B64#KEYSTORE_BASE64=}"
+          # Remove whitespace/newlines that may be introduced during copy-paste.
+          B64="$(printf '%s' "$B64" | tr -d '\r\n\t ')"
+          if [ -z "$B64" ]; then
+            echo "KEYSTORE_BASE64 secret resolved to empty after normalization."
+            exit 1
+          fi
+          if ! printf '%s' "$B64" | base64 --decode > "$GITHUB_WORKSPACE/release-keystore.jks"; then
+            echo "Failed to decode KEYSTORE_BASE64. Ensure the secret contains only the base64 keystore content."
+            exit 1
+          fi
+          if [ ! -s "$GITHUB_WORKSPACE/release-keystore.jks" ]; then
+            echo "Decoded keystore file is empty."
+            exit 1
+          fi
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
