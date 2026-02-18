@@ -1,44 +1,47 @@
-# Android MCP Agent
+# Android AI MCP
 
-An Android application that acts as a Model Context Protocol (MCP) server, allowing AI agents to control the device via WebSocket.
+Android AI MCP is a personal Android app that uses Accessibility APIs and a cloud LLM planner to execute user-confirmed UI action plans.
 
-## Features
-- **WebSocket Server**: Runs on port 8765
-- **Accessibility Service**: Performs clicks, scrolls, and text input
-- **Secure Pairing**: Time-limited 6-digit codes and auth tokens
-- **Action Logging**: Audit trail of all executed commands
+## Core flow
+1. Add provider API keys in Setup.
+2. Enable Accessibility service.
+3. Enter a natural-language command.
+4. Generate an AI action plan.
+5. Review preview and confirm execution.
+6. Track results in Logs.
 
-## Build Instructions
+## Providers
+- OpenRouter: `moonshotai/kimi-k2.5`
+- NVIDIA NIM: `moonshotai/kimi-k2.5`
 
-### GitHub Actions (Recommended)
-This project is configured with GitHub Actions to automatically build the APK on push.
-1. Push the code to your GitHub repository.
-2. Go to the "Actions" tab in your repository.
-3. Select the "Android CI" workflow.
-4. Download the `app-debug` artifact from the latest run.
+Provider selection is manual in-app, and the selected provider key is required.
 
-### Local Build
-Prerequisites:
+## Safety controls
+- Mandatory plan preview before execution
+- Stop execution button
+- Configurable max step limit in settings (`1-50`, default `20`)
+- Sequential execution with delay (default `700ms`)
+
+## Build requirements
 - JDK 17
-- Android SDK
-- Gradle 8.11.1 (or use the included wrapper)
+- Android SDK (compile/target SDK 36)
+- Gradle wrapper in repo
 
+## Local build
 ```bash
-# Using Gradle Wrapper (recommended)
-./gradlew assembleDebug
-
-# Or with your local Gradle installation
-gradle assembleDebug
+./gradlew :app:assembleDebug
 ```
 
-## Usage
-1. **Install & Open**: Install the APK and open the app.
-2. **Enable Service**: Go to `Dashboard` -> `Open Accessibility Settings` -> Enable `Android MCP Agent`.
-3. **Start Server**: Tap `Start Server` on the Dashboard.
-4. **Pair Client**:
-   - Go to `Pairing` tab.
-   - Tap `Generate Pairing Code`.
-   - Send `pair` command from your AI client with the 6-digit code.
+## Release-signed build setup
+Copy `keystore.properties.example` to `keystore.properties` in project root, or set equivalent environment variables.
 
-## Protocol
-See `MCPCommand.kt` for the full list of supported actions and JSON format.
+Expected values:
+- `storeFile`
+- `storePassword`
+- `keyAlias`
+- `keyPassword`
+
+Then run:
+```bash
+./gradlew :app:assembleRelease
+```

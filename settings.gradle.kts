@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AndroidMCPAgent"
+rootProject.name = "AndroidAiMcp"
 include(":app")

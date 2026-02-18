@@ -7,4 +7,4 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="100"
-    android:settingsActivity="com.android.mcp.agent.ui.MainActivity" />
+    android:settingsActivity="com.android.ai.mcp.ui.MainActivity" />
