@@ -84,7 +84,7 @@ class AndroidAiMcpApplication : Application() {
 
     val actionValidator by lazy { ActionValidator() }
 
-    val screenContextReader by lazy { ScreenContextReader() }
+    val screenContextReader by lazy { ScreenContextReader(this) }
 
     private val uiActionPerformer by lazy {
         UiActionPerformer(

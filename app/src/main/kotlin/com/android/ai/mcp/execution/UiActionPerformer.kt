@@ -39,12 +39,18 @@ class UiActionPerformer(
     }
 
     private fun executeOpenApp(step: PlanStep): ActionExecutionResult {
-        val packageName = step.params.stringParam("package_name")
-            ?: resolvePackageNameByAppName(step.params.stringParam("app_name"))
-            ?: return ActionExecutionResult(
-                success = false,
-                errorMessage = "open_app requires package_name or app_name"
+        val requestedPackageName = step.params.stringParam("package_name")
+        val requestedAppName = step.params.stringParam("app_name")
+        val packageName = resolveLaunchablePackageName(
+            requestedPackageName = requestedPackageName,
+            requestedAppName = requestedAppName
+        ) ?: return ActionExecutionResult(
+            success = false,
+            errorMessage = buildOpenAppErrorMessage(
+                requestedPackageName = requestedPackageName,
+                requestedAppName = requestedAppName
             )
+        )
 
         val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
             ?: return ActionExecutionResult(
@@ -372,18 +378,116 @@ class UiActionPerformer(
         return primitive.jsonPrimitive.content.trim().takeIf { it.isNotEmpty() }
     }
 
-    private fun resolvePackageNameByAppName(appName: String?): String? {
-        val trimmed = appName?.trim()?.lowercase().orEmpty()
-        if (trimmed.isEmpty()) return null
+    private fun resolveLaunchablePackageName(
+        requestedPackageName: String?,
+        requestedAppName: String?
+    ): String? {
+        val packageManager = context.packageManager
+        val requestedPackage = requestedPackageName?.trim()?.takeIf { it.isNotEmpty() }
+        if (requestedPackage != null && packageManager.getLaunchIntentForPackage(requestedPackage) != null) {
+            return requestedPackage
+        }
 
-        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val candidates = context.packageManager.queryIntentActivities(launcherIntent, 0)
-        return candidates.firstOrNull { resolveInfo ->
-            val label = resolveInfo.loadLabel(context.packageManager)?.toString()
-                ?.trim()
-                ?.lowercase()
-                .orEmpty()
-            label == trimmed || label.contains(trimmed)
-        }?.activityInfo?.packageName
+        val apps = readLaunchableApps()
+        if (apps.isEmpty()) return null
+
+        val queries = linkedSetOf<String>()
+        requestedPackage?.let { queries.add(it.lowercase()) }
+        requestedAppName?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            queries.add(it.lowercase())
+        }
+        inferKeywordFromPackageName(requestedPackage)?.let { queries.add(it) }
+        if (queries.isEmpty()) return null
+
+        var bestMatch: LaunchableAppInfo? = null
+        var bestScore = Int.MIN_VALUE
+        for (app in apps) {
+            val score = queries.maxOf { query -> scoreAppMatch(query, app) }
+            if (score > bestScore) {
+                bestScore = score
+                bestMatch = app
+            }
+        }
+
+        return if (bestScore >= 40) bestMatch?.packageName else null
     }
+
+    private fun readLaunchableApps(): List<LaunchableAppInfo> {
+        val packageManager = context.packageManager
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val resolved = packageManager.queryIntentActivities(launcherIntent, 0)
+        return resolved
+            .mapNotNull { resolveInfo ->
+                val packageName = resolveInfo.activityInfo?.packageName?.trim().orEmpty()
+                if (packageName.isEmpty()) return@mapNotNull null
+                val label = resolveInfo.loadLabel(packageManager)?.toString()?.trim().orEmpty()
+                LaunchableAppInfo(
+                    normalizedLabel = label.ifEmpty { packageName }.lowercase(),
+                    packageName = packageName,
+                    normalizedPackageName = packageName.lowercase()
+                )
+            }
+            .distinctBy { it.packageName }
+    }
+
+    private fun scoreAppMatch(query: String, app: LaunchableAppInfo): Int {
+        val normalizedQuery = query.trim().lowercase()
+        if (normalizedQuery.isEmpty()) return Int.MIN_VALUE
+
+        if (app.normalizedPackageName == normalizedQuery) return 120
+        if (app.normalizedLabel == normalizedQuery) return 110
+
+        var score = 0
+        if (app.normalizedPackageName.startsWith(normalizedQuery)) score += 95
+        if (app.normalizedPackageName.contains(normalizedQuery)) score += 85
+        if (app.normalizedLabel.startsWith(normalizedQuery)) score += 75
+        if (app.normalizedLabel.contains(normalizedQuery)) score += 70
+
+        val tokens = normalizedQuery.split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }
+        if (tokens.isNotEmpty()) {
+            val tokenHits = tokens.count { token ->
+                app.normalizedPackageName.contains(token) || app.normalizedLabel.contains(token)
+            }
+            score += tokenHits * 12
+            if (tokenHits == tokens.size) score += 20
+        }
+
+        return score
+    }
+
+    private fun inferKeywordFromPackageName(packageName: String?): String? {
+        val normalized = packageName?.trim()?.lowercase().orEmpty()
+        if (normalized.isEmpty()) return null
+
+        val parts = normalized.split(".").filter { it.isNotBlank() }
+        return parts.lastOrNull { part ->
+            part.length >= 4 && part !in setOf("com", "android", "app")
+        }
+    }
+
+    private fun buildOpenAppErrorMessage(
+        requestedPackageName: String?,
+        requestedAppName: String?
+    ): String {
+        if (requestedPackageName.isNullOrBlank() && requestedAppName.isNullOrBlank()) {
+            return "open_app requires package_name or app_name"
+        }
+        return buildString {
+            append("Could not resolve a launchable app")
+            requestedPackageName?.takeIf { it.isNotBlank() }?.let { append(" for package '$it'") }
+            requestedAppName?.takeIf { it.isNotBlank() }?.let {
+                if (requestedPackageName.isNullOrBlank()) {
+                    append(" for app '$it'")
+                } else {
+                    append(" or app '$it'")
+                }
+            }
+        }
+    }
+
+    private data class LaunchableAppInfo(
+        val normalizedLabel: String,
+        val packageName: String,
+        val normalizedPackageName: String
+    )
 }

@@ -23,6 +23,7 @@ class PromptBuilder {
               8) fill_saved_password with optional field_hint and optional account_hint
             - Use params object for every step.
             - Do not use any action outside the allowlist.
+            - When opening apps, prefer package_name values from the launchable_apps list in screen context.
         """.trimIndent()
     }
 
