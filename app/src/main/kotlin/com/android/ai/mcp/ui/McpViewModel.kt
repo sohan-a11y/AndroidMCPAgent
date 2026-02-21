@@ -19,6 +19,7 @@ import com.android.ai.mcp.execution.ActionExecutor
 import com.android.ai.mcp.storage.automation.TaskTemplateEntity
 import com.android.ai.mcp.system.ExecutionForegroundService
 import com.android.ai.mcp.system.MCPAccessibilityService
+import com.android.ai.mcp.system.PlanNotificationActionReceiver
 import com.android.ai.mcp.system.PlanReadyNotifier
 import com.android.ai.mcp.system.VoiceCommandService
 import kotlinx.coroutines.CancellableContinuation
@@ -52,6 +53,25 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingWakeEnableAfterPermission = false
     private var isHostForeground = false
 
+    private val notificationActionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                PlanNotificationActionReceiver.ACTION_CONFIRM_PLAN -> {
+                    if (_uiState.value.executionState == ExecutionState.READY_FOR_CONFIRMATION) {
+                        confirmAndExecutePlan()
+                        PlanReadyNotifier.dismiss(getApplication())
+                    }
+                }
+                PlanNotificationActionReceiver.ACTION_CANCEL_PLAN -> {
+                    if (_uiState.value.executionState == ExecutionState.READY_FOR_CONFIRMATION) {
+                        cancelPreview()
+                        PlanReadyNotifier.dismiss(getApplication())
+                    }
+                }
+            }
+        }
+    }
+
     private val voiceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != VoiceCommandService.ACTION_VOICE_COMMAND) return
@@ -75,6 +95,7 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         registerVoiceReceiver()
+        registerNotificationActionReceiver()
         observeSettings()
         observeLogs()
         observeTemplates()
@@ -87,11 +108,13 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        val context = getApplication<Application>()
         try {
-            getApplication<Application>().unregisterReceiver(voiceReceiver)
-        } catch (_: Exception) {
-            // Ignore if already unregistered.
-        }
+            context.unregisterReceiver(voiceReceiver)
+        } catch (_: Exception) { }
+        try {
+            context.unregisterReceiver(notificationActionReceiver)
+        } catch (_: Exception) { }
     }
 
     fun refreshAccessibilityStatus() {
@@ -325,12 +348,67 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun selectRunForDetail(runId: Long) {
+        _uiState.update { it.copy(selectedRunId = runId, selectedRunSteps = emptyList()) }
+        viewModelScope.launch {
+            app.logsRepository.observeStepsByRun(runId).collectLatest { steps ->
+                _uiState.update { it.copy(selectedRunSteps = steps) }
+            }
+        }
+    }
+
+    fun clearRunDetail() {
+        _uiState.update { it.copy(selectedRunId = null, selectedRunSteps = emptyList()) }
+    }
+
+    fun rerunFromLog(run: com.android.ai.mcp.storage.logs.CommandRunEntity) {
+        onCommandTextChanged(run.commandText)
+        generatePlanFromCommand(
+            command = run.commandText,
+            commandSource = CommandSource.MANUAL,
+            templateId = null
+        )
+    }
+
     fun generatePlan() {
         val command = _uiState.value.commandText.trim()
         generatePlanFromCommand(
             command = command,
             commandSource = CommandSource.MANUAL,
             templateId = null
+        )
+    }
+
+    fun replanAfterFailure() {
+        val state = _uiState.value
+        val command = state.lastFailedCommand?.trim()
+        val planJson = state.lastFailedPlanJson
+        val failedIndex = state.lastFailedStepIndex
+        val failedError = state.lastFailedStepError
+
+        if (command.isNullOrEmpty() || planJson.isNullOrEmpty() || failedIndex == null || failedError == null) {
+            _uiState.update { it.copy(errorMessage = "No failure context available for re-planning") }
+            return
+        }
+
+        _uiState.update {
+            it.copy(
+                lastFailedPlanJson = null,
+                lastFailedStepIndex = null,
+                lastFailedStepError = null,
+                lastFailedCommand = null
+            )
+        }
+
+        generatePlanFromCommand(
+            command = command,
+            commandSource = CommandSource.MANUAL,
+            templateId = null,
+            retryContext = com.android.ai.mcp.ai.AiPlanner.RetryContext(
+                previousPlanJson = planJson,
+                failedStepIndex = failedIndex,
+                failedStepError = failedError
+            )
         )
     }
 
@@ -537,6 +615,7 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
                     runId = runId,
                     actionPlan = plan,
                     stepDelayMs = state.settings.stepDelayMs,
+                    stepTimeoutMs = state.settings.stepTimeoutMs,
                     startStepIndex = startStepIndex,
                     allowManualHandoff = allowManualHandoff,
                     shouldStop = { stopRequested },
@@ -568,6 +647,14 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
                     ExecutionState.COMPLETED,
                     ExecutionState.STOPPED,
                     ExecutionState.FAILED -> {
+                        val failureContext = if (summary.state == ExecutionState.FAILED) {
+                            Triple(
+                                state.pendingPlanJson,
+                                summary.failedStepIndex,
+                                summary.errorMessage
+                            )
+                        } else null
+
                         _uiState.update {
                             it.copy(
                                 pendingPlan = null,
@@ -583,7 +670,11 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
                                     ExecutionState.STOPPED -> "Execution stopped"
                                     ExecutionState.FAILED -> summary.errorMessage ?: "Execution failed"
                                     else -> "Execution finished"
-                                }
+                                },
+                                lastFailedPlanJson = failureContext?.first,
+                                lastFailedStepIndex = failureContext?.second,
+                                lastFailedStepError = failureContext?.third,
+                                lastFailedCommand = if (failureContext != null) state.commandText else null
                             )
                         }
                     }
@@ -740,6 +831,20 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun registerNotificationActionReceiver() {
+        val context = getApplication<Application>()
+        val filter = IntentFilter().apply {
+            addAction(PlanNotificationActionReceiver.ACTION_CONFIRM_PLAN)
+            addAction(PlanNotificationActionReceiver.ACTION_CANCEL_PLAN)
+        }
+        ContextCompat.registerReceiver(
+            context,
+            notificationActionReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
     private fun selectedModelId(provider: AiProvider, state: McpUiState): String {
         return when (provider) {
             AiProvider.OPENROUTER -> state.settings.openRouterModelId
@@ -773,7 +878,8 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         templateId: Long?,
         providerOverride: AiProvider? = null,
         modelIdOverride: String? = null,
-        maxStepsOverride: Int? = null
+        maxStepsOverride: Int? = null,
+        retryContext: com.android.ai.mcp.ai.AiPlanner.RetryContext? = null
     ) {
         val trimmedCommand = command.trim()
         if (trimmedCommand.isEmpty()) {
@@ -823,7 +929,8 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
                     apiKey = apiKey,
                     command = trimmedCommand,
                     screenContext = screenContext,
-                    maxSteps = maxSteps
+                    maxSteps = maxSteps,
+                    retryContext = retryContext
                 )
 
                 val validation = app.actionValidator.validate(

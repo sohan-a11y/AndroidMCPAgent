@@ -51,6 +51,15 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <receiver
+            android:name=".system.PlanNotificationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.android.ai.mcp.notification.CONFIRM_PLAN" />
+                <action android:name="com.android.ai.mcp.notification.CANCEL_PLAN" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

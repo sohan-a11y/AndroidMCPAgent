@@ -4,6 +4,7 @@ data class AppSettings(
     val selectedProvider: AiProvider = AiProvider.OPENROUTER,
     val maxPlanSteps: Int = DEFAULT_MAX_PLAN_STEPS,
     val stepDelayMs: Int = DEFAULT_STEP_DELAY_MS,
+    val stepTimeoutMs: Long = DEFAULT_STEP_TIMEOUT_MS,
     val openRouterModelId: String = DEFAULT_OPENROUTER_MODEL_ID,
     val nvidiaModelId: String = DEFAULT_NVIDIA_MODEL_ID,
     val wakeWord: String = DEFAULT_WAKE_WORD,
@@ -19,6 +20,10 @@ data class AppSettings(
         const val MIN_STEP_DELAY_MS = 100
         const val MAX_STEP_DELAY_MS = 5000
         const val DEFAULT_STEP_DELAY_MS = 700
+
+        const val MIN_STEP_TIMEOUT_MS = 5_000L
+        const val MAX_STEP_TIMEOUT_MS = 60_000L
+        const val DEFAULT_STEP_TIMEOUT_MS = 15_000L
 
         const val DEFAULT_OPENROUTER_MODEL_ID = "moonshotai/kimi-k2.5:free"
         const val DEFAULT_NVIDIA_MODEL_ID = "moonshotai/kimi-k2.5"
@@ -36,6 +41,10 @@ data class AppSettings(
 
         fun sanitizeStepDelayMs(value: Int): Int {
             return value.coerceIn(MIN_STEP_DELAY_MS, MAX_STEP_DELAY_MS)
+        }
+
+        fun sanitizeStepTimeoutMs(value: Long): Long {
+            return value.coerceIn(MIN_STEP_TIMEOUT_MS, MAX_STEP_TIMEOUT_MS)
         }
 
         fun sanitizeModelId(value: String?, fallback: String): String {

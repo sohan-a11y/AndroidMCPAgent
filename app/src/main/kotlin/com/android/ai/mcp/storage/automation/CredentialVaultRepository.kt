@@ -85,7 +85,11 @@ class CredentialVaultRepository(
             fieldMatch && accountMatch
         } ?: candidates.first()
 
-        val password = cipherManager.decrypt(matched.passwordCiphertext)
+        val password = try {
+            cipherManager.decrypt(matched.passwordCiphertext)
+        } catch (_: Exception) {
+            return null
+        }
         return ResolvedCredential(
             id = matched.id,
             appPackage = matched.appPackage,

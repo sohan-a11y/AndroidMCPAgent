@@ -10,6 +10,12 @@ class AiPlanner(
     private val actionPlanParser: ActionPlanParser
 ) {
 
+    data class RetryContext(
+        val previousPlanJson: String,
+        val failedStepIndex: Int,
+        val failedStepError: String
+    )
+
     data class PlanningResult(
         val actionPlan: ActionPlan,
         val modelId: String,
@@ -25,10 +31,21 @@ class AiPlanner(
         apiKey: String,
         command: String,
         screenContext: String,
-        maxSteps: Int
+        maxSteps: Int,
+        retryContext: RetryContext? = null
     ): PlanningResult {
         val systemPrompt = promptBuilder.buildSystemPrompt(maxSteps)
-        val userPrompt = promptBuilder.buildUserPrompt(command, screenContext)
+        val userPrompt = if (retryContext != null) {
+            promptBuilder.buildRetryUserPrompt(
+                command = command,
+                screenContext = screenContext,
+                previousPlanJson = retryContext.previousPlanJson,
+                failedStepIndex = retryContext.failedStepIndex,
+                failedStepError = retryContext.failedStepError
+            )
+        } else {
+            promptBuilder.buildUserPrompt(command, screenContext)
+        }
 
         val providerResponse = when (provider) {
             AiProvider.OPENROUTER -> {

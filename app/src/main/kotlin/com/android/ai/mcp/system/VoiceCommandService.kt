@@ -30,6 +30,7 @@ class VoiceCommandService : Service() {
         private const val CHANNEL_ID = "mcp_voice_channel"
         private const val NOTIFICATION_ID = 4343
         private const val DUPLICATE_SUPPRESSION_WINDOW_MS = 1800L
+        private const val MAX_CONSECUTIVE_RESTARTS = 10
 
         private const val ACTION_START = "com.android.ai.mcp.voice.START"
         private const val ACTION_STOP = "com.android.ai.mcp.voice.STOP"
@@ -60,6 +61,7 @@ class VoiceCommandService : Service() {
     private var wakeWord: String = "AI"
     private var awaitingCommandAfterWake = false
     private var restartBackoffMs = 700L
+    private var consecutiveRestartAttempts = 0
     private var lastDispatchedCommandNormalized = ""
     private var lastDispatchedAtMs = 0L
 
@@ -157,6 +159,12 @@ class VoiceCommandService : Service() {
             stopSelf()
             return
         }
+        consecutiveRestartAttempts++
+        if (consecutiveRestartAttempts > MAX_CONSECUTIVE_RESTARTS) {
+            Log.e(TAG, "Exceeded $MAX_CONSECUTIVE_RESTARTS consecutive restart attempts, stopping service")
+            stopSelf()
+            return
+        }
         val delayMs = restartBackoffMs.coerceAtMost(5_000L)
         mainHandler.postDelayed(
             { startListening() },
@@ -184,6 +192,8 @@ class VoiceCommandService : Service() {
         }
 
         override fun onResults(results: Bundle?) {
+            consecutiveRestartAttempts = 0
+            restartBackoffMs = 700L
             handleResults(results)
             scheduleRestart()
         }
@@ -204,7 +214,10 @@ class VoiceCommandService : Service() {
         val normalizedWakeWord = wakeWord.trim().lowercase()
         val normalizedSpeech = best.lowercase()
 
-        if (normalizedSpeech.startsWith(normalizedWakeWord)) {
+        val wakeWordMatched = normalizedSpeech == normalizedWakeWord ||
+            normalizedSpeech.startsWith("$normalizedWakeWord ")
+
+        if (wakeWordMatched) {
             val tail = best.drop(wakeWord.length).trim()
             if (tail.isNotEmpty()) {
                 dispatchVoiceCommand(tail)

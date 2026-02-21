@@ -9,6 +9,7 @@ import com.android.ai.mcp.storage.automation.CredentialVaultRepository
 import com.android.ai.mcp.system.MCPAccessibilityService
 import com.android.ai.mcp.system.ScreenContextReader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -33,6 +34,8 @@ class UiActionPerformer(
                 ActionValidator.ACTION_HOME -> executeHome()
                 ActionValidator.ACTION_GET_SCREEN_TEXT -> executeGetScreenText()
                 ActionValidator.ACTION_FILL_SAVED_PASSWORD -> executeFillSavedPassword(step)
+                ActionValidator.ACTION_WAIT_FOR_TEXT -> executeWaitForText(step)
+                ActionValidator.ACTION_LONG_PRESS -> executeLongPress(step)
                 else -> ActionExecutionResult(success = false, errorMessage = "Unsupported action: ${step.action}")
             }
         }
@@ -83,58 +86,62 @@ class UiActionPerformer(
                 errorMessage = "Accessibility service or active window unavailable"
             )
 
-        val appPackage = rootNode.packageName?.toString()
-            ?: return ActionExecutionResult(
+        try {
+            val appPackage = rootNode.packageName?.toString()
+                ?: return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "Could not detect active package for credential lookup"
+                )
+
+            val fieldHint = step.params.stringParam("field_hint")
+            val accountHint = step.params.stringParam("account_hint")
+            val credential = credentialVaultRepository.resolveCredential(
+                appPackage = appPackage,
+                fieldHint = fieldHint,
+                accountHint = accountHint
+            ) ?: return ActionExecutionResult(
                 success = false,
-                errorMessage = "Could not detect active package for credential lookup"
+                errorMessage = "No saved credential matched package '$appPackage'"
             )
 
-        val fieldHint = step.params.stringParam("field_hint")
-        val accountHint = step.params.stringParam("account_hint")
-        val credential = credentialVaultRepository.resolveCredential(
-            appPackage = appPackage,
-            fieldHint = fieldHint,
-            accountHint = accountHint
-        ) ?: return ActionExecutionResult(
-            success = false,
-            errorMessage = "No saved credential matched package '$appPackage'"
-        )
-
-        val targetNode = if (!fieldHint.isNullOrBlank()) {
-            val candidates = mutableListOf<AccessibilityNodeInfo>()
-            findByText(rootNode, fieldHint.lowercase(), candidates)
-            candidates.firstOrNull { it.isEditable || it.className?.toString() == "android.widget.EditText" }
-        } else {
-            collectEditableNodes(rootNode).firstOrNull()
-        } ?: return ActionExecutionResult(
-            success = false,
-            errorMessage = "No editable field found for saved credential input"
-        )
-
-        targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-
-        val arguments = Bundle().apply {
-            putCharSequence(
-                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                credential.password
-            )
-        }
-        val setTextResult = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-        if (!setTextResult) {
-            return ActionExecutionResult(
+            val targetNode = if (!fieldHint.isNullOrBlank()) {
+                val candidates = mutableListOf<AccessibilityNodeInfo>()
+                findByText(rootNode, fieldHint.lowercase(), candidates)
+                candidates.firstOrNull { it.isEditable || it.className?.toString() == "android.widget.EditText" }
+            } else {
+                collectEditableNodes(rootNode).firstOrNull()
+            } ?: return ActionExecutionResult(
                 success = false,
-                errorMessage = "Failed to fill saved password"
+                errorMessage = "No editable field found for saved credential input"
             )
-        }
 
-        val payload = buildJsonObject {
-            put("credential_filled", JsonPrimitive(true))
-            put("account_label", JsonPrimitive(credential.accountLabel))
-            put("package_name", JsonPrimitive(credential.appPackage))
-        }
+            targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
 
-        return ActionExecutionResult(success = true, resultJson = payload.toString())
+            val arguments = Bundle().apply {
+                putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                    credential.password
+                )
+            }
+            val setTextResult = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            if (!setTextResult) {
+                return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "Failed to fill saved password"
+                )
+            }
+
+            val payload = buildJsonObject {
+                put("credential_filled", JsonPrimitive(true))
+                put("account_label", JsonPrimitive(credential.accountLabel))
+                put("package_name", JsonPrimitive(credential.appPackage))
+            }
+
+            return ActionExecutionResult(success = true, resultJson = payload.toString())
+        } finally {
+            rootNode.recycle()
+        }
     }
 
     private fun executeClickByText(step: PlanStep): ActionExecutionResult {
@@ -150,37 +157,41 @@ class UiActionPerformer(
                 errorMessage = "Accessibility service or active window unavailable"
             )
 
-        val matchingNodes = mutableListOf<AccessibilityNodeInfo>()
-        findByText(rootNode, text.lowercase(), matchingNodes)
+        try {
+            val matchingNodes = mutableListOf<AccessibilityNodeInfo>()
+            findByText(rootNode, text.lowercase(), matchingNodes)
 
-        if (matchingNodes.isEmpty()) {
-            return ActionExecutionResult(
-                success = false,
-                errorMessage = "No element matched text '$text'"
-            )
+            if (matchingNodes.isEmpty()) {
+                return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "No element matched text '$text'"
+                )
+            }
+
+            val targetNode = matchingNodes.first()
+            var clickableNode: AccessibilityNodeInfo? = targetNode
+            while (clickableNode != null && !clickableNode.isClickable) {
+                clickableNode = clickableNode.parent
+            }
+
+            val clicked = (clickableNode ?: targetNode).performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (!clicked) {
+                return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "Click action returned false"
+                )
+            }
+
+            val payload = buildJsonObject {
+                put("clicked", JsonPrimitive(true))
+                put("matched_text", JsonPrimitive(text))
+                put("matches_found", JsonPrimitive(matchingNodes.size))
+            }
+
+            return ActionExecutionResult(success = true, resultJson = payload.toString())
+        } finally {
+            rootNode.recycle()
         }
-
-        val targetNode = matchingNodes.first()
-        var clickableNode: AccessibilityNodeInfo? = targetNode
-        while (clickableNode != null && !clickableNode.isClickable) {
-            clickableNode = clickableNode.parent
-        }
-
-        val clicked = (clickableNode ?: targetNode).performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        if (!clicked) {
-            return ActionExecutionResult(
-                success = false,
-                errorMessage = "Click action returned false"
-            )
-        }
-
-        val payload = buildJsonObject {
-            put("clicked", JsonPrimitive(true))
-            put("matched_text", JsonPrimitive(text))
-            put("matches_found", JsonPrimitive(matchingNodes.size))
-        }
-
-        return ActionExecutionResult(success = true, resultJson = payload.toString())
     }
 
     private fun executeInputText(step: PlanStep): ActionExecutionResult {
@@ -196,46 +207,50 @@ class UiActionPerformer(
                 errorMessage = "Accessibility service or active window unavailable"
             )
 
-        val fieldHint = step.params.stringParam("field_hint")
-        val targetNode = if (fieldHint != null) {
-            val candidates = mutableListOf<AccessibilityNodeInfo>()
-            findByText(rootNode, fieldHint.lowercase(), candidates)
-            candidates.firstOrNull { it.isEditable || it.className?.toString() == "android.widget.EditText" }
-        } else {
-            collectEditableNodes(rootNode).firstOrNull()
+        try {
+            val fieldHint = step.params.stringParam("field_hint")
+            val targetNode = if (fieldHint != null) {
+                val candidates = mutableListOf<AccessibilityNodeInfo>()
+                findByText(rootNode, fieldHint.lowercase(), candidates)
+                candidates.firstOrNull { it.isEditable || it.className?.toString() == "android.widget.EditText" }
+            } else {
+                collectEditableNodes(rootNode).firstOrNull()
+            }
+
+            if (targetNode == null) {
+                return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "No editable field found"
+                )
+            }
+
+            targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+
+            val arguments = Bundle().apply {
+                putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                    text
+                )
+            }
+
+            val setTextResult = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            if (!setTextResult) {
+                return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "Failed to set text"
+                )
+            }
+
+            val payload = buildJsonObject {
+                put("input_set", JsonPrimitive(true))
+                put("text_length", JsonPrimitive(text.length))
+            }
+
+            return ActionExecutionResult(success = true, resultJson = payload.toString())
+        } finally {
+            rootNode.recycle()
         }
-
-        if (targetNode == null) {
-            return ActionExecutionResult(
-                success = false,
-                errorMessage = "No editable field found"
-            )
-        }
-
-        targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-
-        val arguments = Bundle().apply {
-            putCharSequence(
-                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                text
-            )
-        }
-
-        val setTextResult = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-        if (!setTextResult) {
-            return ActionExecutionResult(
-                success = false,
-                errorMessage = "Failed to set text"
-            )
-        }
-
-        val payload = buildJsonObject {
-            put("input_set", JsonPrimitive(true))
-            put("text_length", JsonPrimitive(text.length))
-        }
-
-        return ActionExecutionResult(success = true, resultJson = payload.toString())
     }
 
     private fun executeScroll(step: PlanStep): ActionExecutionResult {
@@ -246,37 +261,41 @@ class UiActionPerformer(
                 errorMessage = "Accessibility service or active window unavailable"
             )
 
-        val scrollableNode = findScrollable(rootNode)
-            ?: return ActionExecutionResult(
-                success = false,
-                errorMessage = "No scrollable node found"
-            )
+        try {
+            val scrollableNode = findScrollable(rootNode)
+                ?: return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "No scrollable node found"
+                )
 
-        val action = when (direction) {
-            "down", "right" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            "up", "left" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-            else -> {
+            val action = when (direction) {
+                "down", "right" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                "up", "left" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                else -> {
+                    return ActionExecutionResult(
+                        success = false,
+                        errorMessage = "Invalid scroll direction: $direction"
+                    )
+                }
+            }
+
+            val scrolled = scrollableNode.performAction(action)
+            if (!scrolled) {
                 return ActionExecutionResult(
                     success = false,
-                    errorMessage = "Invalid scroll direction: $direction"
+                    errorMessage = "Scroll action returned false"
                 )
             }
-        }
 
-        val scrolled = scrollableNode.performAction(action)
-        if (!scrolled) {
-            return ActionExecutionResult(
-                success = false,
-                errorMessage = "Scroll action returned false"
-            )
-        }
+            val payload = buildJsonObject {
+                put("scrolled", JsonPrimitive(true))
+                put("direction", JsonPrimitive(direction))
+            }
 
-        val payload = buildJsonObject {
-            put("scrolled", JsonPrimitive(true))
-            put("direction", JsonPrimitive(direction))
+            return ActionExecutionResult(success = true, resultJson = payload.toString())
+        } finally {
+            rootNode.recycle()
         }
-
-        return ActionExecutionResult(success = true, resultJson = payload.toString())
     }
 
     private fun executeBack(): ActionExecutionResult {
@@ -312,6 +331,88 @@ class UiActionPerformer(
             })
         }
         return ActionExecutionResult(success = true, resultJson = payload.toString())
+    }
+
+    private suspend fun executeWaitForText(step: PlanStep): ActionExecutionResult {
+        val text = step.params.stringParam("text")
+            ?: return ActionExecutionResult(
+                success = false,
+                errorMessage = "wait_for_text missing text"
+            )
+
+        val timeoutMs = step.params.stringParam("timeout_ms")?.toLongOrNull() ?: 10_000L
+        val pollIntervalMs = 500L
+        val startTime = System.currentTimeMillis()
+
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            val visibleTexts = screenContextReader.readVisibleText()
+            val lowerQuery = text.lowercase()
+            if (visibleTexts.any { it.lowercase().contains(lowerQuery) }) {
+                val payload = buildJsonObject {
+                    put("text_found", JsonPrimitive(true))
+                    put("matched_text", JsonPrimitive(text))
+                    put("waited_ms", JsonPrimitive(System.currentTimeMillis() - startTime))
+                }
+                return ActionExecutionResult(success = true, resultJson = payload.toString())
+            }
+            delay(pollIntervalMs)
+        }
+
+        return ActionExecutionResult(
+            success = false,
+            errorMessage = "Text '$text' not found within ${timeoutMs}ms"
+        )
+    }
+
+    private fun executeLongPress(step: PlanStep): ActionExecutionResult {
+        val text = step.params.stringParam("text")
+            ?: return ActionExecutionResult(
+                success = false,
+                errorMessage = "long_press missing text"
+            )
+
+        val rootNode = rootNodeOrNull()
+            ?: return ActionExecutionResult(
+                success = false,
+                errorMessage = "Accessibility service or active window unavailable"
+            )
+
+        try {
+            val matchingNodes = mutableListOf<AccessibilityNodeInfo>()
+            findByText(rootNode, text.lowercase(), matchingNodes)
+
+            if (matchingNodes.isEmpty()) {
+                return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "No element matched text '$text'"
+                )
+            }
+
+            val targetNode = matchingNodes.first()
+            var longClickableNode: AccessibilityNodeInfo? = targetNode
+            while (longClickableNode != null && !longClickableNode.isLongClickable) {
+                longClickableNode = longClickableNode.parent
+            }
+
+            val pressed = (longClickableNode ?: targetNode)
+                .performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+
+            if (!pressed) {
+                return ActionExecutionResult(
+                    success = false,
+                    errorMessage = "Long press action returned false"
+                )
+            }
+
+            val payload = buildJsonObject {
+                put("long_pressed", JsonPrimitive(true))
+                put("matched_text", JsonPrimitive(text))
+            }
+
+            return ActionExecutionResult(success = true, resultJson = payload.toString())
+        } finally {
+            rootNode.recycle()
+        }
     }
 
     private fun rootNodeOrNull(): AccessibilityNodeInfo? {
@@ -437,22 +538,25 @@ class UiActionPerformer(
         if (app.normalizedPackageName == normalizedQuery) return 120
         if (app.normalizedLabel == normalizedQuery) return 110
 
-        var score = 0
-        if (app.normalizedPackageName.startsWith(normalizedQuery)) score += 95
-        if (app.normalizedPackageName.contains(normalizedQuery)) score += 85
-        if (app.normalizedLabel.startsWith(normalizedQuery)) score += 75
-        if (app.normalizedLabel.contains(normalizedQuery)) score += 70
+        val substringScore = when {
+            app.normalizedPackageName.startsWith(normalizedQuery) -> 95
+            app.normalizedLabel.startsWith(normalizedQuery) -> 85
+            app.normalizedPackageName.contains(normalizedQuery) -> 75
+            app.normalizedLabel.contains(normalizedQuery) -> 70
+            else -> 0
+        }
 
         val tokens = normalizedQuery.split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }
+        var tokenScore = 0
         if (tokens.isNotEmpty()) {
             val tokenHits = tokens.count { token ->
                 app.normalizedPackageName.contains(token) || app.normalizedLabel.contains(token)
             }
-            score += tokenHits * 12
-            if (tokenHits == tokens.size) score += 20
+            tokenScore = tokenHits * 12
+            if (tokenHits == tokens.size) tokenScore += 20
         }
 
-        return score
+        return maxOf(substringScore, tokenScore)
     }
 
     private fun inferKeywordFromPackageName(packageName: String?): String? {

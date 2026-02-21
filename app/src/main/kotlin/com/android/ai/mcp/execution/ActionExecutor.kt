@@ -1,10 +1,12 @@
 package com.android.ai.mcp.execution
 
 import com.android.ai.mcp.domain.ActionPlan
+import com.android.ai.mcp.domain.AppSettings
 import com.android.ai.mcp.domain.ExecutionState
 import com.android.ai.mcp.domain.PlanStep
 import com.android.ai.mcp.storage.logs.LogsRepository
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 class ActionExecutor(
     private val uiActionPerformer: UiActionPerformer,
@@ -22,6 +24,7 @@ class ActionExecutor(
         runId: Long,
         actionPlan: ActionPlan,
         stepDelayMs: Int,
+        stepTimeoutMs: Long = AppSettings.DEFAULT_STEP_TIMEOUT_MS,
         startStepIndex: Int = 0,
         allowManualHandoff: Boolean = true,
         shouldStop: () -> Boolean,
@@ -74,7 +77,12 @@ class ActionExecutor(
             }
 
             val startedAt = System.currentTimeMillis()
-            val result = uiActionPerformer.execute(step)
+            val result = withTimeoutOrNull(stepTimeoutMs) {
+                uiActionPerformer.execute(step)
+            } ?: ActionExecutionResult(
+                success = false,
+                errorMessage = "Step timed out after ${stepTimeoutMs}ms"
+            )
             val duration = System.currentTimeMillis() - startedAt
 
             logsRepository.addStepExecution(

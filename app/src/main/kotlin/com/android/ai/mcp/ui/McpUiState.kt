@@ -8,6 +8,7 @@ import com.android.ai.mcp.domain.ExecutionState
 import com.android.ai.mcp.storage.automation.CredentialEntryEntity
 import com.android.ai.mcp.storage.automation.TaskTemplateEntity
 import com.android.ai.mcp.storage.logs.CommandRunEntity
+import com.android.ai.mcp.storage.logs.StepExecutionEntity
 
 data class McpUiState(
     val settings: AppSettings = AppSettings(),
@@ -46,5 +47,11 @@ data class McpUiState(
     val isMicrophonePermissionGranted: Boolean = false,
     val pendingCredentialFillPrompt: CredentialFillPrompt? = null,
     val logs: List<CommandRunEntity> = emptyList(),
-    val errorMessage: String? = null
+    val selectedRunSteps: List<StepExecutionEntity> = emptyList(),
+    val selectedRunId: Long? = null,
+    val errorMessage: String? = null,
+    val lastFailedPlanJson: String? = null,
+    val lastFailedStepIndex: Int? = null,
+    val lastFailedStepError: String? = null,
+    val lastFailedCommand: String? = null
 )

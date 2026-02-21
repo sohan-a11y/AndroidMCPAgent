@@ -35,7 +35,7 @@ class ActionPlanParser(
                 val params = when (val paramsElement = stepObject["params"]) {
                     is JsonObject -> paramsElement.toMap()
                     else -> stepObject
-                        .filterKeys { it != "action" }
+                        .filterKeys { it != "action" && it != "params" }
                         .mapValues { (_, value) -> value as JsonElement }
                 }
 

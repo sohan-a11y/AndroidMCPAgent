@@ -64,6 +64,7 @@ private object Routes {
     const val Vault = "vault"
     const val Preview = "preview"
     const val Logs = "logs"
+    const val RunDetail = "run_detail"
 
     val BottomTabs = listOf(Setup, Command, Templates, Vault, Logs)
 }
@@ -253,7 +254,28 @@ private fun AndroidAiMcpApp(
             composable(Routes.Logs) {
                 LogsScreen(
                     uiState = uiState,
-                    onClearLogs = viewModel::clearLogs
+                    onClearLogs = viewModel::clearLogs,
+                    onRunClicked = { runId ->
+                        viewModel.selectRunForDetail(runId)
+                        navController.navigate(Routes.RunDetail)
+                    }
+                )
+            }
+
+            composable(Routes.RunDetail) {
+                RunDetailScreen(
+                    uiState = uiState,
+                    onBack = {
+                        viewModel.clearRunDetail()
+                        navController.popBackStack()
+                    },
+                    onRerun = { run ->
+                        viewModel.rerunFromLog(run)
+                        navController.navigate(Routes.Command) {
+                            popUpTo(Routes.Command) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
         }

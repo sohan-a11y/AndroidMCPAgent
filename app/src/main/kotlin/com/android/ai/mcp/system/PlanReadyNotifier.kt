@@ -29,13 +29,33 @@ object PlanReadyNotifier {
             manager.createNotificationChannel(channel)
         }
 
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val pendingIntent = PendingIntent.getActivity(
+        val openPendingIntent = PendingIntent.getActivity(
             context,
             0,
-            intent,
+            openIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val confirmIntent = Intent(context, PlanNotificationActionReceiver::class.java).apply {
+            action = PlanNotificationActionReceiver.ACTION_CONFIRM_PLAN
+        }
+        val confirmPendingIntent = PendingIntent.getBroadcast(
+            context,
+            1,
+            confirmIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val cancelIntent = Intent(context, PlanNotificationActionReceiver::class.java).apply {
+            action = PlanNotificationActionReceiver.ACTION_CANCEL_PLAN
+        }
+        val cancelPendingIntent = PendingIntent.getBroadcast(
+            context,
+            2,
+            cancelIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -43,10 +63,17 @@ object PlanReadyNotifier {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(context.getString(R.string.plan_ready_title))
             .setContentText(context.getString(R.string.plan_ready_text, commandText.take(48)))
-            .setContentIntent(pendingIntent)
+            .setContentIntent(openPendingIntent)
             .setAutoCancel(true)
+            .addAction(0, "Confirm", confirmPendingIntent)
+            .addAction(0, "Cancel", cancelPendingIntent)
             .build()
 
         manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    fun dismiss(context: Context) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(NOTIFICATION_ID)
     }
 }

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.android.ai.mcp.domain.AiProvider
@@ -26,6 +27,7 @@ class SettingsRepository(
         private val KEY_SELECTED_PROVIDER = stringPreferencesKey("selected_provider")
         private val KEY_MAX_PLAN_STEPS = intPreferencesKey("max_plan_steps")
         private val KEY_STEP_DELAY_MS = intPreferencesKey("step_delay_ms")
+        private val KEY_STEP_TIMEOUT_MS = longPreferencesKey("step_timeout_ms")
         private val KEY_OPENROUTER_MODEL_ID = stringPreferencesKey("openrouter_model_id")
         private val KEY_NVIDIA_MODEL_ID = stringPreferencesKey("nvidia_model_id")
         private val KEY_WAKE_WORD = stringPreferencesKey("wake_word")
@@ -63,6 +65,13 @@ class SettingsRepository(
         val safeValue = AppSettings.sanitizeStepDelayMs(value)
         context.dataStore.edit { prefs ->
             prefs[KEY_STEP_DELAY_MS] = safeValue
+        }
+    }
+
+    suspend fun setStepTimeoutMs(value: Long) {
+        val safeValue = AppSettings.sanitizeStepTimeoutMs(value)
+        context.dataStore.edit { prefs ->
+            prefs[KEY_STEP_TIMEOUT_MS] = safeValue
         }
     }
 
@@ -114,6 +123,9 @@ class SettingsRepository(
         val stepDelayMs = AppSettings.sanitizeStepDelayMs(
             this[KEY_STEP_DELAY_MS] ?: AppSettings.DEFAULT_STEP_DELAY_MS
         )
+        val stepTimeoutMs = AppSettings.sanitizeStepTimeoutMs(
+            this[KEY_STEP_TIMEOUT_MS] ?: AppSettings.DEFAULT_STEP_TIMEOUT_MS
+        )
         val openRouterModelId = AppSettings.sanitizeModelId(
             this[KEY_OPENROUTER_MODEL_ID],
             AppSettings.DEFAULT_OPENROUTER_MODEL_ID
@@ -134,6 +146,7 @@ class SettingsRepository(
             selectedProvider = selectedProvider,
             maxPlanSteps = maxPlanSteps,
             stepDelayMs = stepDelayMs,
+            stepTimeoutMs = stepTimeoutMs,
             openRouterModelId = openRouterModelId,
             nvidiaModelId = nvidiaModelId,
             wakeWord = wakeWord,

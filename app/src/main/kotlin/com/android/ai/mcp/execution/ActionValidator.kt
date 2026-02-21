@@ -18,6 +18,8 @@ class ActionValidator {
         const val ACTION_HOME = "home"
         const val ACTION_GET_SCREEN_TEXT = "get_screen_text"
         const val ACTION_FILL_SAVED_PASSWORD = "fill_saved_password"
+        const val ACTION_WAIT_FOR_TEXT = "wait_for_text"
+        const val ACTION_LONG_PRESS = "long_press"
 
         val ALLOWED_ACTIONS = setOf(
             ACTION_OPEN_APP,
@@ -27,7 +29,9 @@ class ActionValidator {
             ACTION_BACK,
             ACTION_HOME,
             ACTION_GET_SCREEN_TEXT,
-            ACTION_FILL_SAVED_PASSWORD
+            ACTION_FILL_SAVED_PASSWORD,
+            ACTION_WAIT_FOR_TEXT,
+            ACTION_LONG_PRESS
         )
 
         private val ALLOWED_SCROLL_DIRECTIONS = setOf("up", "down", "left", "right")
@@ -95,6 +99,18 @@ class ActionValidator {
                     }
                     if (accountHint != null && accountHint.length > 120) {
                         errors.add("Step ${index + 1}: account_hint is too long")
+                    }
+                }
+
+                ACTION_WAIT_FOR_TEXT -> {
+                    if (step.params.requireString("text") == null) {
+                        errors.add("Step ${index + 1}: wait_for_text requires text")
+                    }
+                }
+
+                ACTION_LONG_PRESS -> {
+                    if (step.params.requireString("text") == null) {
+                        errors.add("Step ${index + 1}: long_press requires text")
                     }
                 }
             }
