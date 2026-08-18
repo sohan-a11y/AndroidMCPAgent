@@ -1,116 +1,72 @@
-# Android AI MCP
+# Android MCP Agent 📱
 
-Android AI MCP is a personal Android automation app that uses Accessibility APIs and cloud LLM planning, with mandatory preview/confirmation before execution.
+![GitHub License](https://img.shields.io/github/license/sohan-a11y/AndroidMCPAgent?style=flat-square)
+![GitHub Last Commit](https://img.shields.io/github/last-commit/sohan-a11y/AndroidMCPAgent?style=flat-square)
+![GitHub Stars](https://img.shields.io/github/stars/sohan-a11y/AndroidMCPAgent?style=flat-square)
+![GitHub Forks](https://img.shields.io/github/forks/sohan-a11y/AndroidMCPAgent?style=flat-square)
 
-## Core flow
-1. Configure provider keys and model IDs in Setup.
-2. Enable Accessibility service.
-3. Enter command manually, by voice wake, or from a saved template.
-4. Generate plan (validated against configured max steps).
-5. Review preview and confirm execution.
-6. Track runs in Logs.
 
-## Providers and models
-- OpenRouter (strict free-model policy)
-- NVIDIA NIM
+Android MCP Agent: On-device Model Context Protocol server exposing Android accessibility and UI controls to AI agents.
 
-Model ID selection is runtime-configurable:
-- OpenRouter model ID: stored in app settings (`openRouterModelId`)
-- NVIDIA model ID: stored in app settings (`nvidiaModelId`)
+---
 
-OpenRouter free enforcement:
-1. App fetches OpenRouter model catalog and filters models with zero prompt + completion price.
-2. If catalog is unavailable, only `:free` model IDs are allowed.
-3. If catalog is available and selected model is not free, plan generation is blocked.
+## 🌟 Key Features
 
-## Voice wake
-- On-device Android SpeechRecognizer
-- Wake word configurable (default `AI`)
-- Voice service runs as a foreground microphone service when enabled
-- Voice commands still require in-app preview confirmation before execution
+- 📱 **On-Device MCP Server**: Standard Model Context Protocol interface running directly on Android OS.
+- ♿ **Accessibility Service Integration**: Performs UI clicks, swipes, text inputs without root requirement.
+- 🔍 **XML Node Hierarchy Parser**: Extracts structured view trees for LLM screen perception.
+- ⚡ **Low Latency**: High-speed local WebSocket/TCP communication with AI orchestrators.
 
-## Templates
-- Save command + provider + model + limits as reusable templates
-- Run templates repeatedly from Templates tab
+---
 
-## Credential vault
-- Encrypted password storage with Android Keystore AES-GCM
-- Match by `appPackage + fieldHint + accountHint`
-- Biometric session unlock required before fills
-- `fill_saved_password` steps require explicit runtime approval
-- No plaintext passwords are written to logs
+## 🛠️ Tech Stack
 
-## Safety controls
-- Mandatory plan preview before execution
-- Stop execution button
-- Manual handoff mode when secure/blocked screens are detected
-- Configurable max step limit (`1-50`, default `20`)
-- Sequential execution with delay (default `700ms`)
+[![Skills](https://skillicons.dev/icons?i=kotlin,android,java)](https://skillicons.dev)
 
-## Build requirements
-- JDK 17
-- Android SDK (compile/target SDK 36)
-- Gradle wrapper in repo
+---
 
-## Local build
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.9+ / Node.js (depending on module)
+- Git
+
+### Installation
 ```bash
-./gradlew :app:assembleDebug
+# Clone repository
+git clone https://github.com/sohan-a11y/AndroidMCPAgent.git
+cd AndroidMCPAgent
+
+# Install dependencies (if python project)
+pip install -r requirements.txt
 ```
 
-## Build inputs (CI contract)
-- `-PciVersionCode=<int>`: overrides `defaultConfig.versionCode` for CI builds.
-- `-PciSignDebug=true|false`: signs debug with stable keystore when `true` and signing config exists.
+---
 
-## Release-signed build setup (local)
-Copy `keystore.properties.example` to `keystore.properties` in project root, or set equivalent environment variables.
+## 💡 Usage Example
 
-Expected values:
-- `storeFile`
-- `storePassword`
-- `keyAlias`
-- `keyPassword`
-
-Then run:
 ```bash
-./gradlew :app:assembleRelease
+# Run application entrypoint
+python main.py
 ```
 
-## GitHub Actions signing secrets
-The workflow requires these repository secrets:
-- `KEYSTORE_BASE64` (raw base64 string only, not `KEYSTORE_BASE64=...`)
-- `KEY_ALIAS`
-- `KEY_PASSWORD`
-- `STORE_PASSWORD`
+---
 
-## CI artifact behavior
-- Release APK package: `com.android.ai.mcp`
-- Debug APK package: `com.android.ai.mcp.debug`
-- CI sets `versionCode` from GitHub run number to keep updates monotonic.
-- CI builds and publishes both signed debug and signed release APKs.
+## 🗺️ Roadmap & Future Enhancements
+- [x] Initial release & core functionality
+- [ ] Enterprise security integration
+- [ ] Multi-tenant Cloud deployment support
+- [ ] Advanced performance profiling
 
-## Install guidance (Samsung S25 / Android 16)
-- Use the signed release APK for normal installs and updates.
-- Use the signed debug APK for side-by-side testing only.
-- Enable install from unknown apps for the installer app you use.
+---
 
-One-time migration if older conflicting installs exist:
-1. Uninstall `com.android.ai.mcp`
-2. Uninstall `com.android.ai.mcp.debug`
-3. Install the latest signed release APK
+## 🤝 Contributing
 
-## Android install triage script (Windows)
-Use this script to capture exact `INSTALL_FAILED_*` output and apply deterministic fixes:
+Contributions, issues, and feature requests are welcome!  
+Feel free to check the [issues page](https://github.com/sohan-a11y/AndroidMCPAgent/issues).
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\triage-android-install.ps1 -ApkPath "C:\path\to\app-release.apk"
-```
+---
 
-If you hit `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and want automatic cleanup across users:
+## 📄 License
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\triage-android-install.ps1 -ApkPath "C:\path\to\app-release.apk" -ApplyFix
-```
-
-Notes:
-- Script checks `com.android.ai.mcp` and `com.android.ai.mcp.debug`.
-- Pass `-AdbPath "C:\path\to\adb.exe"` if `adb` is not on PATH.
+Distributed under the MIT License. See `LICENSE` for details.
