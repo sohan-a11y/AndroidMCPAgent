@@ -1,5 +1,12 @@
 # Android AI MCP
 
+![GitHub License](https://img.shields.io/github/license/sohan-a11y/AndroidMCPAgent?style=flat-square)
+![GitHub Last Commit](https://img.shields.io/github/last-commit/sohan-a11y/AndroidMCPAgent?style=flat-square)
+![GitHub Stars](https://img.shields.io/github/stars/sohan-a11y/AndroidMCPAgent?style=flat-square)
+
+[![Skills](https://skillicons.dev/icons?i=kotlin,android,java)](https://skillicons.dev)
+
+
 Android AI MCP is a personal Android automation app that uses Accessibility APIs and cloud LLM planning, with mandatory preview/confirmation before execution.
 
 ## Core flow
@@ -114,3 +121,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\triage-android-install.ps1 -A
 Notes:
 - Script checks `com.android.ai.mcp` and `com.android.ai.mcp.debug`.
 - Pass `-AdbPath "C:\path\to\adb.exe"` if `adb` is not on PATH.
+
+
+---
+
+<div align="center">
+
+**Built by [M Sai Sohan (@sohan-a11y)](https://github.com/sohan-a11y)**
+
+*If you find this project useful, please consider giving it a ⭐ on GitHub!*
+
+</div>
