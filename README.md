@@ -1,13 +1,5 @@
 # Android AI MCP
 
-![GitHub License](https://img.shields.io/github/license/sohan-a11y/AndroidMCPAgent?style=flat-square)
-![GitHub Last Commit](https://img.shields.io/github/last-commit/sohan-a11y/AndroidMCPAgent?style=flat-square)
-![GitHub Stars](https://img.shields.io/github/stars/sohan-a11y/AndroidMCPAgent?style=flat-square)
-![GitHub Forks](https://img.shields.io/github/forks/sohan-a11y/AndroidMCPAgent?style=flat-square)
-
-[![Skills](https://skillicons.dev/icons?i=kotlin,android,java)](https://skillicons.dev)
-
-
 Android AI MCP is a personal Android automation app that uses Accessibility APIs and cloud LLM planning, with mandatory preview/confirmation before execution.
 
 ## Core flow
